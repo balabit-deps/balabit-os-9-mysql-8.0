@@ -1,0 +1,23 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1115,6 +1115,20 @@ IF(LINUX_FEDORA_28 OR LINUX_FEDORA_34 OR
+   ENDIF()
+ ENDIF()
+ 
++# riscv64 needs -latomic for std::atomic<bool>, as RISC-V doesn't provide byte
++# atomics. But because of --as-needed and because I don't know how to use
++# cmake, let's use -pthread instead.
++CHECK_C_SOURCE_COMPILES(
++"#ifndef __riscv
++#error Not RISC-V
++#endif
++int main() {}"
++IS_RISCV
++)
++IF(IS_RISCV)
++  STRING_APPEND(CMAKE_CXX_LINK_FLAGS " -pthread")
++ENDIF()
++
+ IF(LINK_RANDOMIZE)
+   STRING_APPEND(CMAKE_C_FLAGS   " -ffunction-sections -fdata-sections")
+   STRING_APPEND(CMAKE_CXX_FLAGS " -ffunction-sections -fdata-sections")

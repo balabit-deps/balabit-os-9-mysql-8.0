@@ -1,0 +1,14 @@
+debian/additions/mysql-systemd-start usr/share/mysql/
+debian/additions/mysql.cnf etc/mysql/
+debian/additions/mysql.conf.d etc/mysql/
+debian/additions/source_mysql-8.0.py usr/share/apport/package-hooks/
+etc/apparmor.d/usr.sbin.mysqld
+etc/mysql/debian-start
+usr/share/doc/mysql-server-8.0/
+usr/share/mysql/debian_create_root_user.sql
+usr/share/mysql/docs/INFO_BIN
+usr/share/mysql/docs/INFO_SRC
+usr/share/mysql/echo_stderr
+usr/share/mysql/install_rewriter.sql
+usr/share/mysql/mysqld_multi.server
+usr/share/mysql/uninstall_rewriter.sql

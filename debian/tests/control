@@ -1,0 +1,7 @@
+Tests: smoke
+Depends: mysql-server-8.0
+Restrictions: allow-stderr needs-root breaks-testbed
+
+Tests: upstream
+Depends: mysql-testsuite-8.0, libexpect-perl
+Restrictions: allow-stderr breaks-testbed

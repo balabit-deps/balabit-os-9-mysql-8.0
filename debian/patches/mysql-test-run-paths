@@ -1,0 +1,19 @@
+Description: update paths for lz4_decompress and zlib_decompress
+ Since these binaries are moved to /usr/lib/mysql/ by packaging, we also
+ need to ensure that the tests can find them.
+Author: Robie Basak <robie.basak@canonical.com>
+Forwarded: not-needed
+Last-Update: 2018-11-02
+
+--- a/mysql-test/mysql-test-run.pl
++++ b/mysql-test/mysql-test-run.pl
+@@ -3250,7 +3250,8 @@ sub environment_setup {
+ 
+   # zlib_decompress
+   my $exe_zlib_decompress =
+-    mtr_exe_maybe_exists("$path_client_bindir/zlib_decompress");
++    mtr_exe_maybe_exists("$path_client_bindir/zlib_decompress",
++                         "/usr/lib/mysql/zlib_decompress");
+   $ENV{'ZLIB_DECOMPRESS'} = native_path($exe_zlib_decompress);
+ 
+   # Create an environment variable to make it possible

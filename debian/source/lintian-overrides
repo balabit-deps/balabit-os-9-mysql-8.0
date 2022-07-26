@@ -1,0 +1,14 @@
+# New functionality in rapidjson is written with the json license
+# The code using this license has been removed from the source, but
+# the license text is untouched, so there is no code in the source
+# that uses this license.
+license-problem-json-evil extra/rapidjson/license.txt
+# These two files merely list all the different licenses used in the source
+# The error is for the redundant entry of the rapidjson license
+license-problem-json-evil LICENSE
+license-problem-json-evil router/LICENSE.router
+
+# The LICENSE file contains a paragraph explaining why the timezone
+# database is NOT under BCP 78
+license-problem-non-free-RFC-BCP78 LICENSE
+

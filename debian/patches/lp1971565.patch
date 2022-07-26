@@ -1,0 +1,27 @@
+Description: add "name" to the supported global options list so existing
+ configurations keep working
+Bug-Ubuntu: https://bugs.launchpad.net/charm-mysql-router/+bug/1971565
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+
+--- a/router/src/harness/src/loader.cc
++++ b/router/src/harness/src/loader.cc
+@@ -91,9 +91,9 @@ static const char kSignalHandlerServiceN
+ #endif
+ 
+ #ifdef _WIN32
+-static constexpr size_t supported_global_options_size = 21;
++static constexpr size_t supported_global_options_size = 22;
+ #else
+-static constexpr size_t supported_global_options_size = 20;
++static constexpr size_t supported_global_options_size = 21;
+ #endif
+ 
+ static const std::array<const char *, supported_global_options_size>
+@@ -115,6 +115,7 @@ static const std::array<const char *, su
+                              "server_ssl_mode",
+                              "server_ssl_verify",
+                              "max_total_connections",
++                             "name",
+                              "pid_file",
+                              "unknown_config_option",
+ #ifdef _WIN32

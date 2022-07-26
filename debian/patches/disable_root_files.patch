@@ -1,0 +1,45 @@
+Description: disable files that require root privileges during tests
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+
+--- a/mysql-test/mysql-test-run.pl
++++ b/mysql-test/mysql-test-run.pl
+@@ -731,7 +731,8 @@ sub main {
+     $ports_per_thread = $ports_per_thread + 10;
+   }
+ 
+-  create_manifest_file();
++  # This tries to write in the mysqld directory
++  #create_manifest_file();
+ 
+   # Create child processes
+   my %children;
+@@ -785,7 +786,8 @@ sub main {
+     read_plugin_defs($plugin_def, 1) if -e $plugin_def;
+   }
+ 
+-  remove_manifest_file();
++  # This tries to write in the mysqld directory
++  #remove_manifest_file();
+ 
+   if (not $completed) {
+     mtr_error("Test suite aborted");
+@@ -2888,7 +2890,8 @@ sub read_plugin_defs($$) {
+       if ($plugin) {
+         if ($requires_config =~ "yes") {
+           my $component_location = dirname($plugin);
+-          remove_one_config($orig_plug_file, $component_location);
++          # This tries to write in /usr/lib/mysql/plugin
++          #remove_one_config($orig_plug_file, $component_location);
+         }
+       }
+     } else {
+@@ -2896,7 +2899,8 @@ sub read_plugin_defs($$) {
+ 
+         if ($requires_config =~ "yes") {
+           my $component_location = dirname($plugin);
+-          create_one_config($orig_plug_file, $component_location);
++          # This tries to write in /usr/lib/mysql/plugin
++          #create_one_config($orig_plug_file, $component_location);
+         }
+ 
+         $ENV{$plug_var}            = basename($plugin);

@@ -1,0 +1,50 @@
+#!/bin/sh
+# autopkgtest check: Build and run the upstream test suite.
+# (C) 2012 Canonical Ltd.
+# Author: Daniel Kessel <d.kessel@gmx.de>
+
+# running the mysql testsuite as described in:
+# https://bugs.launchpad.net/ubuntu/+source/mysql-5.5/+bug/959683
+
+echo "running test 'testsuite'"
+set -e
+
+SKIP_TEST_LST="/tmp/skip-test.lst"
+WORKDIR=$(mktemp -d)
+trap "rm -rf $WORKDIR $SKIP_TEST_LST" 0 INT QUIT ABRT PIPE TERM
+cd $WORKDIR
+
+mkdir var
+mkdir tmp
+
+echo "using vardir: $WORKDIR/var"
+echo "using tmpdir: $WORKDIR/tmp"
+
+echo "Setting up skip-tests-list"
+cat > $SKIP_TEST_LST << EOF
+binlog.binlog_server_start_options : BUG#00000 - Requires writable /usr
+main.ctype_uca                     : BUG#00000 - Requires writable /usr
+rpl.rpl_gtid_mode                  : BUG#70517 - Requires starting server as root ref http://bugs.mysql.com/bug.php?id=70517
+main.ssl_ca                        : BUG#90749 - Test is breaking on sid, ref https://bugs.mysql.com/bug.php?id=90749
+main.type_float                    : BUG#92375 - Test is breaking on ppc64el. Ref https://bugs.mysql.com/bug.php?id=92375
+main.type_newdecimal               : BUG#92375 - Test is breaking on ppc64el. https://bugs.mysql.com/bug.php?id=92375
+main.type_ranges                   : BUG#92375 - Test is breaking on ppc64el. https://bugs.mysql.com/bug.php?id=92375
+main.mysqlpump_basic               : BUG#86608 - Requires openssl with zlib support. https://bugs.mysql.com/bug.php?id=86608
+main.file_contents                 : BUG#00000 - Tests package contents, which differs from upstream
+main.loaddata_special              : BUG#96341 - Access blocked by apparmor. https://bugs.mysql.com/bug.php?id=96341
+main.mysql_client_test             : BUG#100274 - Unstable test
+main.mtr_unit_tests                : BUG#100532 - Test ignores --client-bindir setting, fails to find mysqltest_safe_process
+main.slow_log                      : BUG#00000 -  broken
+main.index_merge_myisam            : BUG#00000 -  broken on i386
+main.mem_cnt_common                : BUG#00000 -  fails
+EOF
+
+cd /usr/lib/mysql-test
+echo "starting mysql-test-run.pl..."
+# Workaround for change introduced as part of https://www.debian.org/security/2016/dsa-3628
+# Pending upstream fix of mtr includes
+export PERLLIB=.
+./mysql-test-run.pl --suite=main --vardir=$WORKDIR/var --tmpdir=$WORKDIR/tmp \
+    --skip-ndbcluster --parallel=auto --skip-rpl --report-features --client-bindir=/usr/lib/mysql-test/bin/ \
+    --force --skip-test-list=$SKIP_TEST_LST --report-unstable-tests $@ 2>&1
+echo "run: OK"

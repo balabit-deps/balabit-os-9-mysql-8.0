@@ -1,0 +1,2 @@
+# The binaries in the test suite are for internal mtr use, and do not have manpages
+mysql-testsuite-8.0: binary-without-manpage

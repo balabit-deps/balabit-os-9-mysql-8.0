@@ -1,0 +1,85 @@
+Description: Fixes test failing when run as root
+ Certain tests will fail when run as root. This patch fixes one,
+ main.grant_user_lock, which tries to test an anonymous user in
+ a way that fails when running as root. The patch fixes only
+ this test because there have been issues in Debian with only
+ this test failing in this way.
+Author: Lars Tangvald <lars.tangvald@oracle.com>
+Bug-Debian: https://bugs.debian.org/841592
+Bug: http://bugs.mysql.com/bug.php?id=83751
+Last-Update: 2016-11-09
+
+--- a/mysql-test/r/grant_user_lock.result
++++ b/mysql-test/r/grant_user_lock.result
+@@ -98,13 +98,13 @@ CURRENT_USER()
+ DROP USER ''@localhost;
+ # Create anonymous user - LOCK
+ CREATE USER ''@localhost IDENTIFIED BY 'pass' ACCOUNT LOCK;
+-connect(localhost,,pass,test,MASTER_PORT,MASTER_SOCKET);
++connect(localhost, ,pass,test,MASTER_PORT,MASTER_SOCKET);
+ ERROR HY000: Access denied for user '(null)'@'localhost'. Account is locked.
+ DROP USER ''@localhost;
+ # Disabling anonymous user
+ CREATE USER ''@localhost IDENTIFIED BY 'pass';
+ ALTER USER ''@localhost ACCOUNT LOCK;
+-connect(localhost,,pass,test,MASTER_PORT,MASTER_SOCKET);
++connect(localhost, ,pass,test,MASTER_PORT,MASTER_SOCKET);
+ ERROR HY000: Access denied for user '(null)'@'localhost'. Account is locked.
+ DROP USER ''@localhost;
+ # Enabling anonymous user
+--- a/mysql-test/t/grant_user_lock.test
++++ b/mysql-test/t/grant_user_lock.test
+@@ -112,7 +112,7 @@ DROP USER unlocked_user2@localhost;
+ --echo # Create anonymous user
+ connection default;
+ CREATE USER ''@localhost IDENTIFIED BY 'pass';
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ SELECT CURRENT_USER();
+ disconnect anonymous_user_con;
+ connection default;
+@@ -121,7 +121,7 @@ DROP USER ''@localhost;
+ --echo # Create anonymous user - explicit UNLOCK
+ connection default;
+ CREATE USER ''@localhost IDENTIFIED BY 'pass' ACCOUNT UNLOCK;
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ SELECT CURRENT_USER();
+ disconnect anonymous_user_con;
+ connection default;
+@@ -132,7 +132,7 @@ connection default;
+ CREATE USER ''@localhost IDENTIFIED BY 'pass' ACCOUNT LOCK;
+ --replace_result $MASTER_MYSOCK MASTER_SOCKET $MASTER_MYPORT MASTER_PORT
+ --error ER_ACCOUNT_HAS_BEEN_LOCKED
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ connection default;
+ DROP USER ''@localhost;
+ 
+@@ -142,7 +142,7 @@ CREATE USER ''@localhost IDENTIFIED BY '
+ ALTER USER ''@localhost ACCOUNT LOCK;
+ --replace_result $MASTER_MYSOCK MASTER_SOCKET $MASTER_MYPORT MASTER_PORT
+ --error ER_ACCOUNT_HAS_BEEN_LOCKED
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ connection default;
+ DROP USER ''@localhost;
+ 
+@@ -150,7 +150,7 @@ DROP USER ''@localhost;
+ connection default;
+ CREATE USER ''@localhost IDENTIFIED BY 'pass' ACCOUNT LOCK;
+ ALTER USER ''@localhost ACCOUNT UNLOCK;
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ SELECT CURRENT_USER();
+ disconnect anonymous_user_con;
+ connection default;
+@@ -170,7 +170,7 @@ connection default;
+ CREATE user ''@localhost IDENTIFIED BY 'pass';
+ CREATE USER 'unlocked_user'@localhost IDENTIFIED BY 'pass';
+ 
+-connect(anonymous_user_con, localhost, '', pass);
++connect(anonymous_user_con, localhost, ' ', pass);
+ --error ER_TABLEACCESS_DENIED_ERROR
+ UPDATE mysql.user SET account_locked='Y'
+   WHERE user='unlocked_user' and host = 'localhost';

@@ -1,0 +1,10 @@
+usr/bin/mysql_config
+usr/include/mysql/*.h
+usr/include/mysql/mysql/client_plugin.h usr/include/mysql
+usr/include/mysql/mysql/plugin_auth_common.h usr/include/mysql
+usr/include/mysql/mysql/udf_registration_types.h usr/include/mysql
+usr/lib/*/libmysqlclient.a
+usr/lib/*/libmysqlclient.so
+usr/lib/*/libmysqlservices.a
+usr/lib/*/pkgconfig/mysqlclient.pc
+usr/share/aclocal/mysql.m4

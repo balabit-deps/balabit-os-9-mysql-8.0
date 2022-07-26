@@ -1,0 +1,22 @@
+Description: Use correct function for finding test binary
+ We install testing binaries to a private location since they're of no
+ use outside the MySQL test suite. MTR needs to use the correct function
+ to find these binaries when they're not on the system path.
+ Refreshed by Lars Tangvald <lars.tangvald@oracle.com>
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+Bug: https://bugs.mysql.com/bug.php?id=107792
+Last-Update: 2022-07-07
+
+--- mysql-8.0-8.0.30.orig/mysql-test/mysql-test-run.pl
++++ mysql-8.0-8.0.30/mysql-test/mysql-test-run.pl
+@@ -2673,9 +2673,7 @@ sub executable_setup () {
+   $exe_mysql_migrate_keyring =
+     mtr_exe_exists("$path_client_bindir/mysql_migrate_keyring");
+   $exe_mysql_keyring_encryption_test =
+-    my_find_bin($bindir,
+-                [ "runtime_output_directory", "libexec", "sbin", "bin" ],
+-                "mysql_keyring_encryption_test");
++    mtr_exe_exists("$path_client_bindir/mysql_keyring_encryption_test");
+ 
+   # For custom OpenSSL builds, look for the my_openssl executable.
+   $exe_openssl =

@@ -1,0 +1,4 @@
+version=3
+opts=\
+downloadurlmangle=s/\/downloads\/gpg\/?\?file=(mysql-boost-([\d\.]*).tar.gz).*/\/get\/Downloads\/MySQL-8.0\/$1/,pgpsigurlmangle=s/\/get\/Downloads\/MySQL-8.0\/(mysql-boost-([\d\.]*).tar.gz)/\/downloads\/gpg\/?file=$1&p=23/,filenamemangle=s/\/downloads\/gpg\/?\?file=mysql\-boost\-([\d\.]*)\.tar\.gz.*/mysql-boost-$1.tar.gz/ \
+http://dev.mysql.com/downloads/mysql/8.0.html?os=src /downloads/gpg/\?file=mysql-boost-([\d\.]*).tar.gz&p=23

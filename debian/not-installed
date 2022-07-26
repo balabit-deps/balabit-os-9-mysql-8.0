@@ -1,0 +1,10 @@
+usr/share/mysql/README
+usr/share/mysql/README-test
+usr/share/mysql/LICENSE
+usr/share/mysql/LICENSE-test
+usr/share/mysql/docs/ChangeLog
+usr/lib/mysql-router/libmysqlharness.a
+usr/lib/mysql-router/libmysqlrouter_http.so
+usr/lib/mysql-router/libmysqlharness.so
+usr/lib/mysql-router/libmysqlrouter.so
+usr/lib/mysql/plugin/component_test_mysql_current_thread_reader.so

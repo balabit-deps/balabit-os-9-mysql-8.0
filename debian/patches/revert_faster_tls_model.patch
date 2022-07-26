@@ -1,0 +1,21 @@
+Description: revert commit 735bd2a53834266c7256830c8d34672ea55fe17b
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+Forwarded: No, not needed
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/mysql-8.0/+bug/1889851
+Updated: 2021-10-21
+
+--- a/cmake/build_configurations/compiler_options.cmake
++++ b/cmake/build_configurations/compiler_options.cmake
+@@ -64,12 +64,6 @@ IF(UNIX)
+     SET(COMMON_CXX_FLAGS             "-std=c++17 -fno-omit-frame-pointer")
+   ENDIF()
+ 
+-  # Faster TLS model
+-  IF(MY_COMPILER_IS_GNU_OR_CLANG AND NOT SOLARIS AND NOT LINUX_RHEL6)
+-    STRING_APPEND(COMMON_C_FLAGS     " -ftls-model=initial-exec")
+-    STRING_APPEND(COMMON_CXX_FLAGS   " -ftls-model=initial-exec")
+-  ENDIF()
+-
+   # Use STRING_PREPEND here, so command-line input can override our defaults.
+   STRING_PREPEND(CMAKE_C_FLAGS                  "${COMMON_C_FLAGS} ")
+   STRING_PREPEND(CMAKE_C_FLAGS_RELWITHDEBINFO   "${SECTIONS_FLAG} ")

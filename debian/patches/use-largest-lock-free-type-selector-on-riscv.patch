@@ -1,0 +1,63 @@
+From: Sergio Durigan Junior <sergio.durigan@canonical.com>
+Date: Mon, 27 Jul 2020 08:54:58 -0400
+Subject: Use Largest_lock_free_type_selector on RISC-V
+
+This patch is necessary because RISC-V doesn't guarantee the
+always-lock-free property on certain types (like boolean), which
+causes a static_assert to trigger when compiling MySQL on the
+architecture.
+
+Author: Sergio Durigan Junior <sergio.durigan@canonical.com>
+Forwarded: no
+Last-Updated: 2020-07-27
+---
+ .../temptable/include/temptable/lock_free_type.h   | 24 +++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+--- a/storage/temptable/include/temptable/lock_free_type.h
++++ b/storage/temptable/include/temptable/lock_free_type.h
+@@ -102,6 +102,19 @@ enum class Alignment { NATURAL, L1_DCACH
+  * More details and motivation can be found at:
+  *   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0152r0.html
+  * */
++
++/** Ubuntu patch for RISC-V:
++
++    On RISC-V, some types are not always lock-free.  For example,
++    ATOMIC_BOOL_LOCK_FREE is 1, meaning that it is sometimes
++    lock-free.  This causes a compilation error of
++    Lock_free_type_selector because of the static_asserts below.  For
++    this reason, we have to guard the Lock_free_type_selector code
++    with an ifndef when compiling for RISC-V.  We also have to force
++    the use of Largest_lock_free_type_selector instead of
++    Lock_free_type_selector.  */
++
++#ifndef __riscv
+ template <typename T, typename V = void>
+ struct Lock_free_type_selector {
+   static_assert(
+@@ -224,6 +237,13 @@ struct Lock_free_type_selector<
+                 "always-lock-free property. Bailing out ...");
+ #endif
+ };
++#else
++  /** As explained above, if we're compiling for RISC-V then we have
++      to force the use of Largest_lock_free_type_selector instead of
++      Lock_free_type_selector, because the former will work
++      normally, while the latter will fail to compile.  */
++#define Lock_free_type_selector Largest_lock_free_type_selector
++#endif /* ! __riscv */
+ 
+ /** Largest lock-free type selector, a helper utility very much similar
+  * to Lock_free_type_selector with the difference being that it tries hard
+@@ -290,7 +310,9 @@ struct Largest_lock_free_type_selector<
+  *
+  * Always-lock-free guarantee is implemented through the means of
+  * Lock_free_type_selector or Largest_lock_free_type_selector. User code can
+- * opt-in for any of those. By default, Lock_free_type_selector is used.
++ * opt-in for any of those. By default, Lock_free_type_selector is
++ * used, except on RISC-V, where Largest_lock_free_type_selector is
++ * used by default due to atomic type limitations.
+  *
+  * In addition, this type provides an ability to redefine the
+  * alignment-requirement of the underlying always-lock-free type, basically
