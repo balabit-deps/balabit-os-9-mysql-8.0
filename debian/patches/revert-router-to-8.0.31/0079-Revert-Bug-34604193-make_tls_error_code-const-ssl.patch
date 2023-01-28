@@ -1,0 +1,39 @@
+From f6434e2e431f3659e7e2c3400c61feb0645ad9fb Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:51 -0500
+Subject: [PATCH 79/86] Revert "Bug#34604193 make_tls_error_code const-ssl"
+
+This reverts commit e6415888ea60f4aa91b40dc87eae33485dc0b000.
+---
+ router/src/harness/include/mysql/harness/tls_error.h | 2 +-
+ router/src/harness/src/tls_error.cc                  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/router/src/harness/include/mysql/harness/tls_error.h b/router/src/harness/include/mysql/harness/tls_error.h
+index 19a736105cf..3969e2641c7 100644
+--- a/router/src/harness/include/mysql/harness/tls_error.h
++++ b/router/src/harness/include/mysql/harness/tls_error.h
+@@ -74,6 +74,6 @@ HARNESS_TLS_EXPORT std::error_code make_tls_error();
+  * @param ssl a SSL connection
+  * @param res result of a SSL_ function.
+  */
+-HARNESS_TLS_EXPORT std::error_code make_tls_ssl_error(const SSL *ssl, int res);
++HARNESS_TLS_EXPORT std::error_code make_tls_ssl_error(SSL *ssl, int res);
+ 
+ #endif
+diff --git a/router/src/harness/src/tls_error.cc b/router/src/harness/src/tls_error.cc
+index 12679d2fc68..422b884907d 100644
+--- a/router/src/harness/src/tls_error.cc
++++ b/router/src/harness/src/tls_error.cc
+@@ -99,7 +99,7 @@ std::error_code make_tls_error() {
+   return {static_cast<int>(ERR_get_error()), tls_err_category()};
+ }
+ 
+-std::error_code make_tls_ssl_error(const SSL *ssl, int res) {
++std::error_code make_tls_ssl_error(SSL *ssl, int res) {
+   const auto ssl_err = SSL_get_error(ssl, res);
+ 
+   switch (ssl_err) {
+-- 
+2.37.2
+

@@ -264,7 +264,7 @@ static void read_server_cost_constants(THD *thd, TABLE *table,
       if (!table->field[1]->is_null()) {
         char cost_name_buf[MAX_FIELD_WIDTH];
         String cost_name(cost_name_buf, sizeof(cost_name_buf),
-                         &my_charset_utf8_general_ci);
+                         &my_charset_utf8mb3_general_ci);
 
         // Read the name of the cost constant
         table->field[0]->val_str(&cost_name);
@@ -329,10 +329,10 @@ static void read_engine_cost_constants(THD *thd, TABLE *table,
       if (!table->field[3]->is_null()) {
         char engine_name_buf[MAX_FIELD_WIDTH];
         String engine_name(engine_name_buf, sizeof(engine_name_buf),
-                           &my_charset_utf8_general_ci);
+                           &my_charset_utf8mb3_general_ci);
         char cost_name_buf[MAX_FIELD_WIDTH];
         String cost_name(cost_name_buf, sizeof(cost_name_buf),
-                         &my_charset_utf8_general_ci);
+                         &my_charset_utf8mb3_general_ci);
 
         // Read the name of the storage engine
         table->field[0]->val_str(&engine_name);
@@ -391,8 +391,8 @@ static void read_cost_constants(Cost_model_constants *cost_constants) {
   thd->store_globals();
   lex_start(thd);
 
-  TABLE_LIST tables[2] = {TABLE_LIST("mysql", "server_cost", TL_READ),
-                          TABLE_LIST("mysql", "engine_cost", TL_READ)};
+  Table_ref tables[2] = {Table_ref("mysql", "server_cost", TL_READ),
+                         Table_ref("mysql", "engine_cost", TL_READ)};
   tables[0].next_global = tables[0].next_local =
       tables[0].next_name_resolution_table = &tables[1];
 

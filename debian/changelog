@@ -1,3 +1,50 @@
+mysql-8.0 (8.0.32-0ubuntu0.22.04.2) jammy-security; urgency=medium
+
+  * SECURITY REGRESSION: Regression with PyMySQL (LP: #2003835)
+    - d/p/revert-router-to-8.0.31/*.patch: Revert every patch that modified
+      the router directory in version 8.0.32, except for the following:
+      605df79542d, b806d2bbb2d, faabb6e7404, 1ae29236865, d03f34cd9fe.
+    - debian/mysql-router-8.0.install: Removed destination_status files.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Sat, 28 Jan 2023 09:44:32 -0500
+
+mysql-8.0 (8.0.32-0buntu0.22.04.1) jammy-security; urgency=medium
+
+  [ Lars Tangvald ]
+  * Imported upstream version 8.0.32 to fix security issues
+    - https://www.oracle.com/security-alerts/cpujan2023.html#AppendixMSQL
+    - CVE-2022-32221 CVE-2023-21836 CVE-2023-21868 CVE-2023-21869
+    - CVE-2023-21871 CVE-2023-21875 CVE-2023-21877 CVE-2023-21863
+    - CVE-2023-21867 CVE-2023-21870 CVE-2023-21873 CVE-2023-21876
+    - CVE-2023-21878 CVE-2023-21879 CVE-2023-21880 CVE-2023-21881
+    - CVE-2023-21883 CVE-2023-21882 CVE-2023-21887
+    Upstream release notes:
+    - https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-32.html
+  * Remove empty changelog file Docs/Changelog
+  * debian/mysql-router-8.0.install: Added new files
+
+  [ Marc Deslauriers ]
+  * debian/patches/disable_timestamping_test.path: disable test that fails
+    to build on certain archs because of the presence of sizeof in macros.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Fri, 20 Jan 2023 06:54:21 -0500
+
+mysql-8.0 (8.0.31-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.31 to fix security issues (LP: #1992453)
+    - debian/tests/upstream: disable main.derived_limit test that fails on
+      s390x.
+    - Remove d/p/fix_path_mysql_keyring_encryption_test.patch: Fixed
+      upstream.
+    - Remove d/p/lp1971565.patch: Fixed upstream.
+    - debian/mysql-testsuite-8.0.install: added new files.
+    - CVE-2022-21594, CVE-2022-21599, CVE-2022-21604, CVE-2022-21608,
+      CVE-2022-21611, CVE-2022-21617, CVE-2022-21625, CVE-2022-21632,
+      CVE-2022-21633, CVE-2022-21637, CVE-2022-21640, CVE-2022-39400,
+      CVE-2022-39408, CVE-2022-39410
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Wed, 19 Oct 2022 07:35:39 -0400
+
 mysql-8.0 (8.0.30-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.30 to fix security issues

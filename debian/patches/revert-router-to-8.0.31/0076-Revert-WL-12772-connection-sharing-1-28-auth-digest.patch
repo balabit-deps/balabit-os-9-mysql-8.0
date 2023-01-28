@@ -1,0 +1,356 @@
+From ab30ecac39a86c2f49e47e2c804f8df3e9b94e48 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:17 -0500
+Subject: [PATCH 76/86] Revert "WL#12772 connection-sharing [1/28] -
+ auth-digest"
+
+This reverts commit 59b0739996498f7f34faea1225f9dc5a86b3675f.
+---
+ router/src/routing/src/auth_digest.h         | 118 -------------------
+ router/src/routing/src/openssl_digest.h      | 105 -----------------
+ router/src/routing/tests/CMakeLists.txt      |   1 -
+ router/src/routing/tests/test_auth_digest.cc |  83 -------------
+ 4 files changed, 307 deletions(-)
+ delete mode 100644 router/src/routing/src/auth_digest.h
+ delete mode 100644 router/src/routing/src/openssl_digest.h
+ delete mode 100644 router/src/routing/tests/test_auth_digest.cc
+
+diff --git a/router/src/routing/src/auth_digest.h b/router/src/routing/src/auth_digest.h
+deleted file mode 100644
+index 9346d7eca7c..00000000000
+--- a/router/src/routing/src/auth_digest.h
++++ /dev/null
+@@ -1,118 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQLROUTER_ROUTING_AUTH_DIGEST_H
+-#define MYSQLROUTER_ROUTING_AUTH_DIGEST_H
+-
+-#include <optional>
+-#include <string_view>
+-
+-#include "openssl_digest.h"
+-
+-namespace routing::impl {
+-
+-/*
+- * scramble the password with the nonce using a digest function.
+- *
+- * @param nonce the use-once number
+- * @param password cleartext password to scramble
+- * @param digest_func function to use for scrambling
+- * @tparam Ret the inner return type.
+- * @tparam nonce_before_double_hashed_password if nonce or password should be
+- * hashed first.
+- */
+-template <class Ret, bool nonce_before_double_hashed_password>
+-inline std::optional<Ret> scramble(std::string_view nonce,
+-                                   std::string_view password,
+-                                   const EVP_MD *digest_func) {
+-  using return_type = Ret;
+-
+-  // in case of empty password, the hash is empty too
+-  if (password.size() == 0) return Ret{};
+-
+-  openssl::DigestFunc func(digest_func);
+-
+-  const int digest_size = func.size();
+-
+-  openssl::DigestCtx digest(func);
+-
+-  if (!digest.init() || !digest.update(password)) {
+-    return std::nullopt;
+-  }
+-
+-  return_type hashed_password;
+-  hashed_password.resize(digest_size);
+-
+-  if (!digest.finalize(hashed_password) || !digest.init() ||
+-      !digest.update(hashed_password)) {
+-    return std::nullopt;
+-  }
+-
+-  // digest2 (double-hashed password)
+-  return_type digest2;
+-  digest2.resize(digest_size);
+-
+-  if (!digest.finalize(digest2) || !digest.init()) {
+-    return std::nullopt;
+-  }
+-
+-  if (nonce_before_double_hashed_password) {
+-    if (!digest.update(nonce) || !digest.update(digest2)) {
+-      return std::nullopt;
+-    }
+-  } else {
+-    if (!digest.update(digest2) || !digest.update(nonce)) {
+-      return std::nullopt;
+-    }
+-  }
+-
+-  // overwrite the double-hashed password buffer as it isn't needed anymore
+-  //
+-  // hash(nonce + double-hashed)
+-  if (!digest.finalize(digest2)) {
+-    return std::nullopt;
+-  }
+-
+-  // scramble the hashed password with the hash(nonce + double-hashed)
+-  for (int i = 0; i < digest_size; ++i) {
+-    hashed_password[i] ^= digest2[i];
+-  }
+-
+-  return hashed_password;
+-}
+-}  // namespace routing::impl
+-
+-template <class Ret>
+-std::optional<Ret> mysql_native_password_scramble(std::string_view nonce,
+-                                                  std::string_view pwd) {
+-  return routing::impl::scramble<Ret, true>(nonce, pwd, EVP_sha1());
+-}
+-
+-template <class Ret>
+-std::optional<Ret> caching_sha2_password_scramble(std::string_view nonce,
+-                                                  std::string_view pwd) {
+-  return routing::impl::scramble<Ret, false>(nonce, pwd, EVP_sha256());
+-}
+-
+-#endif
+diff --git a/router/src/routing/src/openssl_digest.h b/router/src/routing/src/openssl_digest.h
+deleted file mode 100644
+index 38d7b8048d3..00000000000
+--- a/router/src/routing/src/openssl_digest.h
++++ /dev/null
+@@ -1,105 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQLROUTER_ROUTING_OPENSSL_DIGEST_H
+-#define MYSQLROUTER_ROUTING_OPENSSL_DIGEST_H
+-
+-#include <memory>  // unique_ptr
+-#include <string>
+-#include <string_view>
+-
+-#include <openssl/evp.h>
+-#include <openssl/opensslv.h>
+-
+-namespace openssl {
+-class DigestFunc {
+- public:
+-  DigestFunc(const EVP_MD *func) : func_{func} {}
+-
+-  int size() const { return EVP_MD_size(func_); }
+-
+-  const EVP_MD *native_func() const { return func_; }
+-
+- private:
+-  const EVP_MD *func_;
+-};
+-
+-class DigestCtx {
+- public:
+-  class Deleter {
+-   public:
+-    void operator()(EVP_MD_CTX *ctx) {
+-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+-      EVP_MD_CTX_free(ctx);
+-#else
+-      EVP_MD_CTX_destroy(ctx);
+-#endif
+-    }
+-  };
+-
+-  DigestCtx(const EVP_MD *func) : digest_func_(func) {}
+-  DigestCtx(const DigestFunc &func) : digest_func_(func.native_func()) {}
+-
+-  // reinit digest-ctx with the same digest-function after finalize()
+-  bool init() { return init(digest_func_); }
+-
+-  // init digest-ctx with the digest-function.
+-  bool init(const EVP_MD *digest_func) {
+-    if (digest_func == nullptr) return false;
+-
+-    auto res = EVP_DigestInit_ex(ctx_.get(), digest_func, nullptr);
+-    if (res) digest_func_ = digest_func;
+-
+-    return res;
+-  }
+-
+-  bool init(DigestFunc func) { return init(func.native_func()); }
+-
+-  template <class T>
+-  bool update(const T &data) {
+-    return EVP_DigestUpdate(ctx_.get(), data.data(), data.size());
+-  }
+-
+-  template <class T>
+-  bool finalize(T &out) {
+-    unsigned int written;
+-
+-    return EVP_DigestFinal_ex(
+-        ctx_.get(), reinterpret_cast<unsigned char *>(out.data()), &written);
+-  }
+-
+- private:
+-  const EVP_MD *digest_func_{};
+-
+-  std::unique_ptr<EVP_MD_CTX, Deleter> ctx_ {
+-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+-    EVP_MD_CTX_new()
+-#else
+-    EVP_MD_CTX_create()
+-#endif
+-  };
+-};
+-}  // namespace openssl
+-
+-#endif
+diff --git a/router/src/routing/tests/CMakeLists.txt b/router/src/routing/tests/CMakeLists.txt
+index cd676eb8240..98d3863b4d6 100644
+--- a/router/src/routing/tests/CMakeLists.txt
++++ b/router/src/routing/tests/CMakeLists.txt
+@@ -46,7 +46,6 @@ SET(test_files
+   test_routing.cc
+   test_setup_named_socket_service.cc
+   test_setup_tcp_service.cc
+-  test_auth_digest.cc
+   )
+ 
+ FOREACH(test_file ${test_files})
+diff --git a/router/src/routing/tests/test_auth_digest.cc b/router/src/routing/tests/test_auth_digest.cc
+deleted file mode 100644
+index 50ae8e2b000..00000000000
+--- a/router/src/routing/tests/test_auth_digest.cc
++++ /dev/null
+@@ -1,83 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-#include "auth_digest.h"
+-
+-#include <gtest/gtest.h>
+-
+-#include "hexify.h"
+-#include "mysql/harness/tls_context.h"
+-
+-using mysql_harness::hexify;
+-
+-TEST(AuthDigest, native_password_empty) {
+-  auto scramble_res = mysql_native_password_scramble<std::string>("", "");
+-
+-  ASSERT_TRUE(scramble_res);
+-  EXPECT_EQ(hexify(*scramble_res), hexify(std::string_view("")));
+-}
+-
+-TEST(AuthDigest, native_password) {
+-  auto scramble_res = mysql_native_password_scramble<std::string>(
+-      "01234567890123456789", "pass");
+-
+-  ASSERT_TRUE(scramble_res);
+-  EXPECT_EQ(
+-      *scramble_res,
+-      std::string_view(
+-          "\xfc\xcf\xe5\x3a\x9f\x93\xe3\x84\x61\x18\x0b\xb3\x2c\xc4\xac\x9b"
+-          "\x10\xd0\xc5\xc5"));
+-}
+-
+-// check that Ret can be a uint8-vector
+-TEST(AuthDigest, native_password_vector) {
+-  auto scramble_res = mysql_native_password_scramble<std::vector<uint8_t>>(
+-      "01234567890123456789", "pass");
+-
+-  ASSERT_TRUE(scramble_res);
+-  EXPECT_EQ(*scramble_res,
+-            (std::vector<uint8_t>{0xfc, 0xcf, 0xe5, 0x3a, 0x9f, 0x93, 0xe3,
+-                                  0x84, 0x61, 0x18, 0x0b, 0xb3, 0x2c, 0xc4,
+-                                  0xac, 0x9b, 0x10, 0xd0, 0xc5, 0xc5}));
+-}
+-
+-TEST(AuthDigest, caching_sha2_password) {
+-  auto scramble_res = caching_sha2_password_scramble<std::string>(
+-      "01234567890123456789", "pass");
+-
+-  ASSERT_TRUE(scramble_res);
+-  EXPECT_EQ(
+-      *scramble_res,
+-      std::string_view(
+-          "\x76\x2e\xe9\xe3\x14\x50\x73\x8a\x2f\x64\xe4\xcf\x83\xa3\x20\xd0"
+-          "\xae\x9b\xc0\x6c\x58\x8d\x8d\xef\x1a\xb6\xe7\x68\xaa\x90\x78\xac"))
+-      << hexify(*scramble_res);
+-}
+-
+-int main(int argc, char *argv[]) {
+-  TlsLibraryContext lib_ctx;
+-
+-  ::testing::InitGoogleTest(&argc, argv);
+-
+-  return RUN_ALL_TESTS();
+-}
+-- 
+2.37.2
+

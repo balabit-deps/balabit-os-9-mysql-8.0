@@ -41,11 +41,11 @@
 #include "mysql/harness/utility/string.h"
 #include "mysqlrouter/mysql_client_thread_token.h"
 #include "mysqlrouter/mysql_session.h"  // kSslModePreferred
+#include "mysqlrouter/supported_metadata_cache_options.h"
 #include "mysqlrouter/uri.h"
 #include "mysqlrouter/utils.h"
 #include "plugin_config.h"
 
-using metadata_cache::LookupResult;
 IMPORT_LOG_FUNCTIONS()
 
 static const mysql_harness::AppInfo *g_app_info;
@@ -110,18 +110,23 @@ static std::string get_option(const mysql_harness::ConfigSection *section,
   return def_value;
 }
 
+#define GET_OPTION_CHECKED(option, section, name, def_value) \
+  static_assert(mysql_harness::str_in_collection(            \
+      metadata_cache_supported_options, name));              \
+  option = get_option(section, name, def_value);
+
 static mysqlrouter::SSLOptions make_ssl_options(
     const mysql_harness::ConfigSection *section) {
   mysqlrouter::SSLOptions options;
 
-  options.mode = get_option(section, "ssl_mode",
-                            mysqlrouter::MySQLSession::kSslModePreferred);
-  options.cipher = get_option(section, "ssl_cipher", "");
-  options.tls_version = get_option(section, "tls_version", "");
-  options.ca = get_option(section, "ssl_ca", "");
-  options.capath = get_option(section, "ssl_capath", "");
-  options.crl = get_option(section, "ssl_crl", "");
-  options.crlpath = get_option(section, "ssl_crlpath", "");
+  GET_OPTION_CHECKED(options.mode, section, "ssl_mode",
+                     mysqlrouter::MySQLSession::kSslModePreferred);
+  GET_OPTION_CHECKED(options.cipher, section, "ssl_cipher", "");
+  GET_OPTION_CHECKED(options.tls_version, section, "tls_version", "");
+  GET_OPTION_CHECKED(options.ca, section, "ssl_ca", "");
+  GET_OPTION_CHECKED(options.capath, section, "ssl_capath", "");
+  GET_OPTION_CHECKED(options.crl, section, "ssl_crl", "");
+  GET_OPTION_CHECKED(options.crlpath, section, "ssl_crlpath", "");
 
   return options;
 }
@@ -137,12 +142,11 @@ class MetadataServersStateListener
   }
 
   void notify_instances_changed(
-      const LookupResult & /*instances*/,
-      const metadata_cache::metadata_servers_list_t &metadata_servers,
+      const metadata_cache::ClusterTopology &cluster_topology,
       const bool md_servers_reachable, const uint64_t view_id) override {
     if (!md_servers_reachable) return;
 
-    if (metadata_servers.empty()) {
+    if (cluster_topology.metadata_servers.empty()) {
       // This happens for example when the router could connect to one of the
       // metadata servers but failed to fetch metadata because the connection
       // went down while querying metadata
@@ -154,7 +158,7 @@ class MetadataServersStateListener
 
     // need to convert from ManagedInstance to uri string
     std::vector<std::string> metadata_servers_str;
-    for (auto &md_server : metadata_servers) {
+    for (auto &md_server : cluster_topology.metadata_servers) {
       mysqlrouter::URI uri;
       uri.scheme = "mysql";
       uri.host = md_server.address();
@@ -196,7 +200,7 @@ static void start(mysql_harness::PluginFuncEnv *env) {
         (!config.metadata_cache_dynamic_state ||
          config.metadata_cache_dynamic_state->get_metadata_servers().empty())) {
       throw std::runtime_error(
-          "list of metadata-servers is empty: 'bootstrap_server_addresses' is the configuration file is empty or not set and "s +
+          "list of metadata-servers is empty: 'bootstrap_server_addresses' in the configuration file is empty or not set and "s +
           (!config.metadata_cache_dynamic_state
                ? "no known 'dynamic_config'-file"
                : "list of 'cluster-metadata-servers' in 'dynamic_config'-file "

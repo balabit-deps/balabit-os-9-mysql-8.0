@@ -1,0 +1,27 @@
+From b7cf815217b20d27b80c38b143d39a7ff289faac Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:03:11 -0500
+Subject: [PATCH 12/86] Revert "Bug#34823366 possible data-race creating
+ x-connections"
+
+This reverts commit 739bcdc91d298f1d0622cc55d7136bb04d35dc5e.
+---
+ router/src/routing/src/mysql_routing.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/router/src/routing/src/mysql_routing.cc b/router/src/routing/src/mysql_routing.cc
+index a4f9a5621ef..637e066372b 100644
+--- a/router/src/routing/src/mysql_routing.cc
++++ b/router/src/routing/src/mysql_routing.cc
+@@ -809,7 +809,7 @@ void MySQLRouting::create_connection(
+       auto *new_conn_ptr = new_connection.get();
+ 
+       connection_container_.add_connection(std::move(new_connection));
+-      net::defer(io_ctx, [new_conn_ptr]() { new_conn_ptr->async_run(); });
++      new_conn_ptr->async_run();
+     } break;
+   }
+ }
+-- 
+2.37.2
+

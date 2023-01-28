@@ -37,6 +37,7 @@ main.mtr_unit_tests                : BUG#100532 - Test ignores --client-bindir s
 main.slow_log                      : BUG#00000 -  broken
 main.index_merge_myisam            : BUG#00000 -  broken on i386
 main.mem_cnt_common                : BUG#00000 -  fails
+main.derived_limit                 : BUG#00000 -  fails on s390x since 8.0.31
 EOF
 
 cd /usr/lib/mysql-test

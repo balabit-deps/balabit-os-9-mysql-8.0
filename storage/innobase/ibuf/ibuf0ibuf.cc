@@ -86,7 +86,7 @@ In versions < 4.1.x:
 
 In versions >= 4.1.x:
 
-Note that contary to what we planned in the 1990's, there will only be one
+Note that contrary to what we planned in the 1990's, there will only be one
 insert buffer tree, and that is in the system tablespace of InnoDB.
 
 1. The first field is the space id.
@@ -462,7 +462,7 @@ void ibuf_init_at_db_start(void) {
   ibuf = static_cast<ibuf_t *>(
       ut::zalloc_withkey(UT_NEW_THIS_FILE_PSI_KEY, sizeof(ibuf_t)));
 
-  /* At startup we intialize ibuf to have a maximum of
+  /* At startup we initialize ibuf to have a maximum of
   CHANGE_BUFFER_DEFAULT_SIZE in terms of percentage of the
   buffer pool size. Once ibuf struct is initialized this
   value is updated with the user supplied size by calling
@@ -519,7 +519,7 @@ void ibuf_init_at_db_start(void) {
                                              IBUF_SPACE_ID, 1, 0, 0, 0, 0);
   ibuf->index->n_uniq = REC_MAX_N_FIELDS;
   rw_lock_create(index_tree_rw_lock_key, &ibuf->index->lock,
-                 SYNC_IBUF_INDEX_TREE);
+                 LATCH_ID_IBUF_INDEX_TREE);
   ibuf->index->search_info = btr_search_info_create(ibuf->index->heap);
   ibuf->index->page = FSP_IBUF_TREE_ROOT_PAGE_NO;
   ut_d(ibuf->index->cached = true);
@@ -2047,7 +2047,7 @@ static ulint ibuf_get_merge_page_nos_func(bool contract, const rec_t *rec,
   prev_space_id = 0;
 
   /* Go backwards from the first rec until we reach the border of the
-  'merge area', or the page start or the limit of storeable pages is
+  'merge area', or the page start or the limit of storable pages is
   reached */
 
   while (!page_rec_is_infimum(rec) && UNIV_LIKELY(n_pages < limit)) {
@@ -2411,10 +2411,12 @@ ulint ibuf_merge_in_background(bool full) {
     mutex_enter(&ibuf_mutex);
 
     /* If the ibuf->size is more than half the max_size
-    then we make more agreesive contraction.
+    then we make more aggressive contraction.
     +1 is to avoid division by zero. */
     if (ibuf->size > ibuf->max_size / 2) {
       ulint diff = ibuf->size - ibuf->max_size / 2;
+      /* limits to around 100% value, for shrinking max_size case */
+      diff = std::min(diff, ibuf->max_size);
       n_pages += PCT_IO((diff * 100) / (ibuf->max_size + 1));
     }
 
@@ -3499,8 +3501,8 @@ static void ibuf_insert_to_index_page(
   /* A change buffer merge must occur before users are granted
   any access to the page. No adaptive hash index entries may
   point to a freshly read page. */
-  ut_ad(!block->index);
-  assert_block_ahi_empty(block);
+  ut_ad(!block->ahi.index);
+  block->ahi.assert_empty();
 
   if (UNIV_UNLIKELY(dict_table_is_comp(index->table) != page_is_comp(page))) {
     ib::warn(ER_IB_MSG_611)

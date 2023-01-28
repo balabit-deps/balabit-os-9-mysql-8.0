@@ -1,0 +1,32 @@
+From e1f2b48772b72607526cdffcc51454e61d5b2096 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:57 -0500
+Subject: [PATCH 80/86] Revert "Bug#34604176 hexify.h misses include-guards"
+
+This reverts commit 64ba51a97dd8a30b37587641c869d87b94497164.
+---
+ router/src/harness/include/hexify.h | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/router/src/harness/include/hexify.h b/router/src/harness/include/hexify.h
+index 5e53e99168b..2bedc1b0720 100644
+--- a/router/src/harness/include/hexify.h
++++ b/router/src/harness/include/hexify.h
+@@ -21,8 +21,6 @@
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+-#ifndef MYSQL_HARNESS_HEXIFY_INCLUDED
+-#define MYSQL_HARNESS_HEXIFY_INCLUDED
+ 
+ #include <algorithm>  // copy
+ #include <array>
+@@ -84,5 +82,3 @@ inline std::string hexify(const T &buf) {
+   return out;
+ }
+ }  // namespace mysql_harness
+-
+-#endif
+-- 
+2.37.2
+

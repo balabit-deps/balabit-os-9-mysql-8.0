@@ -1,0 +1,888 @@
+From f59ce8890d391c8798d17a63c87f79421cc25784 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:07:04 -0500
+Subject: [PATCH 43/86] Revert "Bug#34689412 Destinations returned by the
+ metatada-cache lack the type field."
+
+This reverts commit a35e85a184c9ebce34f1f017ad9d9807fb596603.
+---
+ .../mysqlrouter/metadata_cache_datatypes.h    |   9 +-
+ .../metadata_cache/src/cluster_metadata_ar.cc |   3 +-
+ .../metadata_cache/src/cluster_metadata_gr.cc |   9 +-
+ .../src/metadata_cache/src/metadata_cache.cc  |  16 +-
+ .../tests/helper/mock_metadata.h              |   8 +-
+ .../src/metadata_cache/tests/test_metadata.cc | 161 +++++++++--------
+ .../tests/test_metadata_cache_group.cc        | 165 +++++++++---------
+ 7 files changed, 173 insertions(+), 198 deletions(-)
+
+diff --git a/router/src/metadata_cache/include/mysqlrouter/metadata_cache_datatypes.h b/router/src/metadata_cache/include/mysqlrouter/metadata_cache_datatypes.h
+index 2b25e5058f4..042a4aa4b2e 100644
+--- a/router/src/metadata_cache/include/mysqlrouter/metadata_cache_datatypes.h
++++ b/router/src/metadata_cache/include/mysqlrouter/metadata_cache_datatypes.h
+@@ -98,7 +98,6 @@ constexpr const bool kNodeTagHiddenDefault{false};
+ constexpr const bool kNodeTagDisconnectWhenHiddenDefault{true};
+ 
+ enum class ServerMode { ReadWrite, ReadOnly, Unavailable };
+-enum class InstanceType { GroupMember, AsyncMember, ReadReplica };
+ 
+ /** @class ManagedInstance
+  *
+@@ -106,18 +105,16 @@ enum class InstanceType { GroupMember, AsyncMember, ReadReplica };
+  */
+ class METADATA_CACHE_EXPORT ManagedInstance {
+  public:
+-  ManagedInstance(InstanceType p_type, const std::string &p_mysql_server_uuid,
++  ManagedInstance() = default;
++  ManagedInstance(const std::string &p_mysql_server_uuid,
+                   const ServerMode p_mode, const std::string &p_host,
+                   const uint16_t p_port, const uint16_t p_xport);
+ 
+   using TCPAddress = mysql_harness::TCPAddress;
+-  explicit ManagedInstance(InstanceType p_type);
+-  explicit ManagedInstance(InstanceType p_type, const TCPAddress &addr);
++  explicit ManagedInstance(const TCPAddress &addr);
+   operator TCPAddress() const;
+   bool operator==(const ManagedInstance &other) const;
+ 
+-  /** @brief Instance type */
+-  InstanceType type;
+   /** @brief The uuid of the MySQL server */
+   std::string mysql_server_uuid;
+   /** @brief The mode of the server */
+diff --git a/router/src/metadata_cache/src/cluster_metadata_ar.cc b/router/src/metadata_cache/src/cluster_metadata_ar.cc
+index e6716a1fb51..a1d35e93054 100644
+--- a/router/src/metadata_cache/src/cluster_metadata_ar.cc
++++ b/router/src/metadata_cache/src/cluster_metadata_ar.cc
+@@ -188,8 +188,7 @@ ARClusterMetadata::fetch_instances_from_member(
+           std::to_string(row.size()));
+     }
+ 
+-    metadata_cache::ManagedInstance instance{
+-        metadata_cache::InstanceType::AsyncMember};
++    metadata_cache::ManagedInstance instance;
+     instance.mysql_server_uuid = get_string(row[0]);
+ 
+     if (!set_instance_ports(instance, row, 1, 2)) {
+diff --git a/router/src/metadata_cache/src/cluster_metadata_gr.cc b/router/src/metadata_cache/src/cluster_metadata_gr.cc
+index 8f8c6144fbb..7cc0a2675ec 100644
+--- a/router/src/metadata_cache/src/cluster_metadata_gr.cc
++++ b/router/src/metadata_cache/src/cluster_metadata_gr.cc
+@@ -1135,8 +1135,7 @@ GRMetadataBackendV1::fetch_instances_from_metadata_server(
+           std::to_string(row.size()));
+     }
+ 
+-    metadata_cache::ManagedInstance s{
+-        metadata_cache::InstanceType::GroupMember};
++    metadata_cache::ManagedInstance s;
+     s.mysql_server_uuid = get_string(row[1]);
+     if (!set_instance_ports(s, row, 2, 3)) {
+       return true;  // next row
+@@ -1225,8 +1224,7 @@ GRMetadataBackendV2::fetch_instances_from_metadata_server(
+           std::to_string(row.size()));
+     }
+ 
+-    metadata_cache::ManagedInstance instance{
+-        metadata_cache::InstanceType::GroupMember};
++    metadata_cache::ManagedInstance instance;
+     instance.mysql_server_uuid = get_string(row[0]);
+     if (!set_instance_ports(instance, row, 1, 2)) {
+       return true;  // next row
+@@ -1441,8 +1439,7 @@ void GRClusterSetMetadataBackend::
+           mysqlrouter::URI uri_classic("mysql://" + node_addr_classic);
+           mysqlrouter::URI uri_x("mysql://" + node_addr_x);
+           result.clusters_data.back().members.emplace_back(
+-              metadata_cache::InstanceType::GroupMember, node_uuid,
+-              metadata_cache::ServerMode::ReadOnly, uri_classic.host,
++              node_uuid, metadata_cache::ServerMode::ReadOnly, uri_classic.host,
+               uri_classic.port, uri_x.port);
+ 
+           set_instance_attributes(result.clusters_data.back().members.back(),
+diff --git a/router/src/metadata_cache/src/metadata_cache.cc b/router/src/metadata_cache/src/metadata_cache.cc
+index 320ac881ceb..e7125dae6e8 100644
+--- a/router/src/metadata_cache/src/metadata_cache.cc
++++ b/router/src/metadata_cache/src/metadata_cache.cc
+@@ -235,23 +235,15 @@ bool metadata_cache::ManagedInstance::operator==(
+ }
+ 
+ metadata_cache::ManagedInstance::ManagedInstance(
+-    InstanceType p_type, const std::string &p_mysql_server_uuid,
+-    const ServerMode p_mode, const std::string &p_host, const uint16_t p_port,
+-    const uint16_t p_xport)
+-    : type(p_type),
+-      mysql_server_uuid(p_mysql_server_uuid),
++    const std::string &p_mysql_server_uuid, const ServerMode p_mode,
++    const std::string &p_host, const uint16_t p_port, const uint16_t p_xport)
++    : mysql_server_uuid(p_mysql_server_uuid),
+       mode(p_mode),
+       host(p_host),
+       port(p_port),
+       xport(p_xport) {}
+ 
+-metadata_cache::ManagedInstance::ManagedInstance(InstanceType p_type) {
+-  type = p_type;
+-}
+-
+-metadata_cache::ManagedInstance::ManagedInstance(InstanceType p_type,
+-                                                 const TCPAddress &addr)
+-    : ManagedInstance(p_type) {
++metadata_cache::ManagedInstance::ManagedInstance(const TCPAddress &addr) {
+   host = addr.address();
+   port = addr.port();
+ }
+diff --git a/router/src/metadata_cache/tests/helper/mock_metadata.h b/router/src/metadata_cache/tests/helper/mock_metadata.h
+index 66f92b7cb89..f17c8e8ee72 100644
+--- a/router/src/metadata_cache/tests/helper/mock_metadata.h
++++ b/router/src/metadata_cache/tests/helper/mock_metadata.h
+@@ -41,9 +41,9 @@ class MockNG : public GRClusterMetadata {
+   /**
+    * Objects representing the servers that are part of the topology.
+    */
+-  metadata_cache::ManagedInstance ms1{GR};
+-  metadata_cache::ManagedInstance ms2{GR};
+-  metadata_cache::ManagedInstance ms3{GR};
++  metadata_cache::ManagedInstance ms1;
++  metadata_cache::ManagedInstance ms2;
++  metadata_cache::ManagedInstance ms3;
+ 
+   /**
+    * Server list for the cluster. Each server object
+@@ -115,8 +115,6 @@ class MockNG : public GRClusterMetadata {
+    */
+   unsigned int fetch_ttl() override;
+ #endif
+- private:
+-  static constexpr auto GR = metadata_cache::InstanceType::GroupMember;
+ };
+ 
+ #endif  // MOCK_METADATA_INCLUDED
+diff --git a/router/src/metadata_cache/tests/test_metadata.cc b/router/src/metadata_cache/tests/test_metadata.cc
+index cf63a85d102..e37e9e735e2 100644
+--- a/router/src/metadata_cache/tests/test_metadata.cc
++++ b/router/src/metadata_cache/tests/test_metadata.cc
+@@ -59,8 +59,6 @@ using mysqlrouter::MySQLSession;
+ using State = GroupReplicationMember::State;
+ using Role = GroupReplicationMember::Role;
+ 
+-constexpr auto GR = metadata_cache::InstanceType::GroupMember;
+-
+ ////////////////////////////////////////////////////////////////////////////////
+ //
+ // These tests focus on testing functionality implemented in
+@@ -287,7 +285,7 @@ class MetadataTest : public ::testing::Test {
+ 
+   void connect_to_first_metadata_server() {
+     std::vector<ManagedInstance> metadata_servers{
+-        {GR, "instance-1", ServerMode::ReadWrite, "localhost", 3310, 33100},
++        {"instance-1", ServerMode::ReadWrite, "localhost", 3310, 33100},
+     };
+     session_factory.get(0).set_good_conns(
+         {"localhost:3310", "localhost:3320", "localhost:3330"});
+@@ -398,9 +396,9 @@ class MetadataTest : public ::testing::Test {
+       {
+           // will be set ----------------------vvvvvvvvvvvvvvvvvvvvvvv
+           // v--v--vv--- ignored at the time of writing
+-          {GR, "instance-1", ServerMode::Unavailable, "localhost", 3310, 33100},
+-          {GR, "instance-2", ServerMode::Unavailable, "localhost", 3320, 33200},
+-          {GR, "instance-3", ServerMode::Unavailable, "localhost", 3330, 33300},
++          {"instance-1", ServerMode::Unavailable, "localhost", 3310, 33100},
++          {"instance-2", ServerMode::Unavailable, "localhost", 3320, 33200},
++          {"instance-3", ServerMode::Unavailable, "localhost", 3330, 33300},
+           // ignored at time of writing
+           // -^^^^--------------------------------------------------------^^^^^
+           // TODO: ok to ignore xport?
+@@ -415,8 +413,8 @@ class MetadataTest : public ::testing::Test {
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ TEST_F(MetadataTest, ConnectToMetadataServer_Succeed) {
+-  ManagedInstance metadata_server{
+-      GR, "instance-1", ServerMode::ReadWrite, "localhost", 3310, 33100};
++  ManagedInstance metadata_server{"instance-1", ServerMode::ReadWrite,
++                                  "localhost", 3310, 33100};
+   session_factory.get(0).set_good_conns({"localhost:3310"});
+ 
+   // should connect successfully
+@@ -427,8 +425,8 @@ TEST_F(MetadataTest, ConnectToMetadataServer_Succeed) {
+ }
+ 
+ TEST_F(MetadataTest, ConnectToMetadataServer_Failed) {
+-  ManagedInstance metadata_server{
+-      GR, "instance-1", ServerMode::ReadWrite, "localhost", 3310, 33100};
++  ManagedInstance metadata_server{"instance-1", ServerMode::ReadWrite,
++                                  "localhost", 3310, 33100};
+ 
+   // connection attempt should fail
+   EXPECT_CALL(session_factory.get(0), flag_fail(_, 3310)).Times(1);
+@@ -480,22 +478,22 @@ TEST_F(MetadataTest, FetchInstancesFromMetadataServer) {
+ 
+       EXPECT_EQ(4u, cluster.members.size());  // not set/checked
+       // -------------------vvvvvvvvvvvvvvvvvvvvvvv
+-      EXPECT_TRUE(cmp_mi_FIFMS(
+-          ManagedInstance{GR, "instance-1", ServerMode::Unavailable,
+-                          "localhost", 3310, 33100},
+-          cluster.members.at(0)));
+-      EXPECT_TRUE(cmp_mi_FIFMS(
+-          ManagedInstance{GR, "instance-2", ServerMode::Unavailable,
+-                          "localhost", 3320, 33200},
+-          cluster.members.at(1)));
+-      EXPECT_TRUE(cmp_mi_FIFMS(
+-          ManagedInstance{GR, "instance-3", ServerMode::Unavailable,
+-                          "localhost", 3306, 33060},
+-          cluster.members.at(2)));
+-      EXPECT_TRUE(cmp_mi_FIFMS(
+-          ManagedInstance{GR, "instance-4", ServerMode::Unavailable, "", 3306,
+-                          33060},
+-          cluster.members.at(3)));
++      EXPECT_TRUE(
++          cmp_mi_FIFMS(ManagedInstance{"instance-1", ServerMode::Unavailable,
++                                       "localhost", 3310, 33100},
++                       cluster.members.at(0)));
++      EXPECT_TRUE(
++          cmp_mi_FIFMS(ManagedInstance{"instance-2", ServerMode::Unavailable,
++                                       "localhost", 3320, 33200},
++                       cluster.members.at(1)));
++      EXPECT_TRUE(
++          cmp_mi_FIFMS(ManagedInstance{"instance-3", ServerMode::Unavailable,
++                                       "localhost", 3306, 33060},
++                       cluster.members.at(2)));
++      EXPECT_TRUE(
++          cmp_mi_FIFMS(ManagedInstance{"instance-4", ServerMode::Unavailable,
++                                       "", 3306, 33060},
++                       cluster.members.at(3)));
+       // TODO is this really right behavior?
+       // ---------------------------------------------------------------------------------------------------^^
+     });
+@@ -567,7 +565,7 @@ TEST_F(MetadataTest, FetchInstancesFromMetadataServer) {
+ TEST_F(MetadataTest, CheckClusterStatus_1Online1RecoveringNotInMetadata) {
+   std::vector<ManagedInstance> servers_in_metadata{
+       // ServerMode doesn't matter ---vvvvv
+-      {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
++      {"instance-1", ServerMode::Unavailable, "", 0, 0},
+   };
+   bool metadata_gr_discrepancy{false};
+ 
+@@ -596,9 +594,9 @@ TEST_F(MetadataTest, CheckClusterStatus_1Online1RecoveringNotInMetadata) {
+ TEST_F(MetadataTest, CheckClusterStatus_3NodeSetup) {
+   std::vector<ManagedInstance> servers_in_metadata{
+       // ServerMode doesn't matter ------vvvvvvvvvvv
+-      {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-3", ServerMode::Unavailable, "", 0, 0},
++      {"instance-1", ServerMode::Unavailable, "", 0, 0},
++      {"instance-2", ServerMode::Unavailable, "", 0, 0},
++      {"instance-3", ServerMode::Unavailable, "", 0, 0},
+   };
+   bool metadata_gr_discrepancy{false};
+ 
+@@ -883,13 +881,13 @@ TEST_F(MetadataTest, CheckClusterStatus_VariableNodeSetup) {
+   {
+     std::vector<ManagedInstance> servers_in_metadata{
+         // ServerMode doesn't matter ------vvvvvvvvvvv
+-        {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-3", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-4", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-5", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-6", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-7", ServerMode::Unavailable, "", 0, 0},
++        {"instance-1", ServerMode::Unavailable, "", 0, 0},
++        {"instance-2", ServerMode::Unavailable, "", 0, 0},
++        {"instance-3", ServerMode::Unavailable, "", 0, 0},
++        {"instance-4", ServerMode::Unavailable, "", 0, 0},
++        {"instance-5", ServerMode::Unavailable, "", 0, 0},
++        {"instance-6", ServerMode::Unavailable, "", 0, 0},
++        {"instance-7", ServerMode::Unavailable, "", 0, 0},
+     };
+     EXPECT_EQ(GRClusterStatus::AvailableWritable,
+               metadata.check_cluster_status(servers_in_metadata, server_status,
+@@ -905,10 +903,10 @@ TEST_F(MetadataTest, CheckClusterStatus_VariableNodeSetup) {
+   // 4-node setup according to metadata
+   {
+     std::vector<ManagedInstance> servers_in_metadata{
+-        {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-3", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-4", ServerMode::Unavailable, "", 0, 0},
++        {"instance-1", ServerMode::Unavailable, "", 0, 0},
++        {"instance-2", ServerMode::Unavailable, "", 0, 0},
++        {"instance-3", ServerMode::Unavailable, "", 0, 0},
++        {"instance-4", ServerMode::Unavailable, "", 0, 0},
+     };
+     EXPECT_EQ(GRClusterStatus::AvailableWritable,
+               metadata.check_cluster_status(servers_in_metadata, server_status,
+@@ -935,8 +933,8 @@ TEST_F(MetadataTest, CheckClusterStatus_VariableNodeSetup) {
+   // count
+   {
+     std::vector<ManagedInstance> servers_in_metadata{
+-        {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-        {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
++        {"instance-1", ServerMode::Unavailable, "", 0, 0},
++        {"instance-2", ServerMode::Unavailable, "", 0, 0},
+     };
+     EXPECT_EQ(GRClusterStatus::AvailableWritable,
+               metadata.check_cluster_status(servers_in_metadata, server_status,
+@@ -952,7 +950,7 @@ TEST_F(MetadataTest, CheckClusterStatus_VariableNodeSetup) {
+   // counts
+   {
+     std::vector<ManagedInstance> servers_in_metadata{
+-        {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
++        {"instance-1", ServerMode::Unavailable, "", 0, 0},
+     };
+     EXPECT_EQ(GRClusterStatus::Unavailable,
+               metadata.check_cluster_status(servers_in_metadata, server_status,
+@@ -996,9 +994,9 @@ TEST_F(MetadataTest, CheckClusterStatus_VariousStatuses) {
+ 
+   std::vector<ManagedInstance> servers_in_metadata{
+       // ServerMode doesn't matter ------vvvvvvvvvvv
+-      {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-3", ServerMode::Unavailable, "", 0, 0},
++      {"instance-1", ServerMode::Unavailable, "", 0, 0},
++      {"instance-2", ServerMode::Unavailable, "", 0, 0},
++      {"instance-3", ServerMode::Unavailable, "", 0, 0},
+   };
+ 
+   for (State state :
+@@ -1074,9 +1072,9 @@ TEST_F(MetadataTest, CheckClusterStatus_Recovering) {
+ 
+   std::vector<ManagedInstance> servers_in_metadata{
+       // ServerMode doesn't matter ------vvvvvvvvvvv
+-      {GR, "instance-1", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-2", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "instance-3", ServerMode::Unavailable, "", 0, 0},
++      {"instance-1", ServerMode::Unavailable, "", 0, 0},
++      {"instance-2", ServerMode::Unavailable, "", 0, 0},
++      {"instance-3", ServerMode::Unavailable, "", 0, 0},
+   };
+ 
+   // 1 node recovering, 1 RW, 1 RO
+@@ -1272,9 +1270,9 @@ TEST_F(MetadataTest, CheckClusterStatus_Cornercase2of5Alive) {
+ 
+   // MD defines 3 nodes
+   std::vector<ManagedInstance> servers_in_metadata{
+-      {GR, "node-A", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-B", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-C", ServerMode::Unavailable, "", 0, 0},
++      {"node-A", ServerMode::Unavailable, "", 0, 0},
++      {"node-B", ServerMode::Unavailable, "", 0, 0},
++      {"node-C", ServerMode::Unavailable, "", 0, 0},
+   };
+ 
+   // GR reports 5 nodes, of which only 2 are alive (no qourum), BUT from
+@@ -1349,9 +1347,9 @@ TEST_F(MetadataTest, CheckClusterStatus_Cornercase3of5Alive) {
+ 
+   // MD defines 3 nodes
+   std::vector<ManagedInstance> servers_in_metadata{
+-      {GR, "node-A", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-B", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-C", ServerMode::Unavailable, "", 0, 0},
++      {"node-A", ServerMode::Unavailable, "", 0, 0},
++      {"node-B", ServerMode::Unavailable, "", 0, 0},
++      {"node-C", ServerMode::Unavailable, "", 0, 0},
+   };
+ 
+   // GR reports 5 nodes, of which 3 are alive (have qourum), BUT from
+@@ -1425,9 +1423,9 @@ TEST_F(MetadataTest, CheckClusterStatus_Cornercase1Common) {
+ 
+   // MD defines 3 nodes
+   std::vector<ManagedInstance> servers_in_metadata{
+-      {GR, "node-A", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-B", ServerMode::Unavailable, "", 0, 0},
+-      {GR, "node-C", ServerMode::Unavailable, "", 0, 0},
++      {"node-A", ServerMode::Unavailable, "", 0, 0},
++      {"node-B", ServerMode::Unavailable, "", 0, 0},
++      {"node-C", ServerMode::Unavailable, "", 0, 0},
+   };
+ 
+   // GR reports 3 nodes, of which 3 are alive (have qourum), BUT from
+@@ -1533,13 +1531,13 @@ TEST_F(MetadataTest, UpdateClusterStatus_PrimaryMember_FailConnectOnNode2) {
+       cluster);
+ 
+   EXPECT_EQ(3u, cluster.members.size());
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-1", ServerMode::ReadWrite,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-1", ServerMode::ReadWrite,
+                                         "localhost", 3310, 33100},
+                         cluster.members.at(0)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-2", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-2", ServerMode::ReadOnly,
+                                         "localhost", 3320, 33200},
+                         cluster.members.at(1)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-3", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-3", ServerMode::ReadOnly,
+                                         "localhost", 3330, 33300},
+                         cluster.members.at(2)));
+ 
+@@ -1660,13 +1658,13 @@ TEST_F(MetadataTest, UpdateClusterStatus_PrimaryMember_FailQueryOnNode1) {
+ 
+   // query_status reported back from instance-2
+   EXPECT_EQ(3u, cluster.members.size());
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-1", ServerMode::ReadWrite,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-1", ServerMode::ReadWrite,
+                                         "localhost", 3310, 33100},
+                         cluster.members.at(0)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-2", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-2", ServerMode::ReadOnly,
+                                         "localhost", 3320, 33200},
+                         cluster.members.at(1)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-3", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-3", ServerMode::ReadOnly,
+                                         "localhost", 3330, 33300},
+                         cluster.members.at(2)));
+ }
+@@ -1803,13 +1801,13 @@ TEST_F(MetadataTest, UpdateClusterStatus_Status_FailQueryOnNode1) {
+ 
+   // query_status reported back from instance-1
+   EXPECT_EQ(3u, cluster.members.size());
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-1", ServerMode::ReadWrite,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-1", ServerMode::ReadWrite,
+                                         "localhost", 3310, 33100},
+                         cluster.members.at(0)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-2", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-2", ServerMode::ReadOnly,
+                                         "localhost", 3320, 33200},
+                         cluster.members.at(1)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-3", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-3", ServerMode::ReadOnly,
+                                         "localhost", 3330, 33300},
+                         cluster.members.at(2)));
+ }
+@@ -1945,13 +1943,13 @@ TEST_F(MetadataTest, UpdateClusterStatus_SimpleSunnyDayScenario) {
+ 
+   // query_status reported back from instance-1
+   EXPECT_EQ(3u, cluster.members.size());
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-1", ServerMode::ReadWrite,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-1", ServerMode::ReadWrite,
+                                         "localhost", 3310, 33100},
+                         cluster.members.at(0)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-2", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-2", ServerMode::ReadOnly,
+                                         "localhost", 3320, 33200},
+                         cluster.members.at(1)));
+-  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{GR, "instance-3", ServerMode::ReadOnly,
++  EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-3", ServerMode::ReadOnly,
+                                         "localhost", 3330, 33300},
+                         cluster.members.at(2)));
+ }
+@@ -2031,18 +2029,15 @@ TEST_F(MetadataTest, FetchInstances_ok) {
+     const auto topology = res.value();
+ 
+     EXPECT_EQ(3u, topology.cluster_data.members.size());
+-    EXPECT_TRUE(
+-        cmp_mi_FI(ManagedInstance{GR, "instance-1", ServerMode::ReadWrite,
+-                                  "localhost", 3310, 33100},
+-                  topology.cluster_data.members.at(0)));
+-    EXPECT_TRUE(
+-        cmp_mi_FI(ManagedInstance{GR, "instance-2", ServerMode::ReadOnly,
+-                                  "localhost", 3320, 33200},
+-                  topology.cluster_data.members.at(1)));
+-    EXPECT_TRUE(
+-        cmp_mi_FI(ManagedInstance{GR, "instance-3", ServerMode::ReadOnly,
+-                                  "localhost", 3330, 33300},
+-                  topology.cluster_data.members.at(2)));
++    EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-1", ServerMode::ReadWrite,
++                                          "localhost", 3310, 33100},
++                          topology.cluster_data.members.at(0)));
++    EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-2", ServerMode::ReadOnly,
++                                          "localhost", 3320, 33200},
++                          topology.cluster_data.members.at(1)));
++    EXPECT_TRUE(cmp_mi_FI(ManagedInstance{"instance-3", ServerMode::ReadOnly,
++                                          "localhost", 3330, 33300},
++                          topology.cluster_data.members.at(2)));
+   });
+ }
+ 
+diff --git a/router/src/routing/tests/test_metadata_cache_group.cc b/router/src/routing/tests/test_metadata_cache_group.cc
+index 3a7233bfa08..84a77c35453 100644
+--- a/router/src/routing/tests/test_metadata_cache_group.cc
++++ b/router/src/routing/tests/test_metadata_cache_group.cc
+@@ -45,8 +45,6 @@ using ::testing::_;
+ 
+ using namespace std::chrono_literals;
+ 
+-constexpr auto GR = metadata_cache::InstanceType::GroupMember;
+-
+ bool operator==(const std::unique_ptr<Destination> &a, const Destination &b) {
+   return a->hostname() == b.hostname() && a->port() == b.port();
+ }
+@@ -195,9 +193,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnPrimaries) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   {
+@@ -225,9 +223,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnSinglePrimary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // only one PRIMARY
+@@ -254,9 +252,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnNoPrimary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // no PRIMARY
+@@ -281,9 +279,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnSecondaries) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // two SECONDARY's
+@@ -312,9 +310,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnSingleSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // one SECONDARY
+@@ -341,9 +339,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailableOnNoSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
+   });
+ 
+   // no SECONDARY
+@@ -369,9 +367,9 @@ TEST_F(DestMetadataCacheTest, StrategyFirstAvailablePrimaryAndSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // all nodes
+@@ -402,10 +400,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinWithFallbackUnavailableServer) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::Unavailable, "3306", 3306,
+-       33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::Unavailable, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
+   });
+ 
+   // all available nodes
+@@ -445,10 +442,10 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinOnPrimaries) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
+-      {GR, "uuid4", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
++      {"uuid4", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
+   });
+ 
+   // all PRIMARY nodes
+@@ -497,9 +494,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinOnSinglePrimary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // the one PRIMARY nodes
+@@ -526,8 +523,8 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinPrimaryMissing) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // no PRIMARY nodes
+@@ -552,10 +549,10 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinOnSecondaries) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+-      {GR, "uuid4", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid4", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
+   });
+ 
+   // all SECONDARY nodes
+@@ -604,9 +601,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinOnSingleSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // the one SECONDARY nodes
+@@ -633,8 +630,8 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinSecondaryMissing) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3308", 3308, 33062},
+   });
+ 
+   // no SECONDARY nodes
+@@ -660,9 +657,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinPrimaryAndSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3309", 3309, 33063},
+   });
+ 
+   // all nodes
+@@ -714,9 +711,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinWithFallbackBasicScenario) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // we have 2 SECONDARIES up so we expect round robin on them
+@@ -753,9 +750,9 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinWithFallbackSingleSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // we do not fallback to PRIMARIES as long as there is at least single
+@@ -783,8 +780,8 @@ TEST_F(DestMetadataCacheTest, StrategyRoundRobinWithFallbackNoSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+   });
+ 
+   // no SECONDARY available so we expect round-robin on PRIAMRIES
+@@ -833,9 +830,9 @@ TEST_F(DestMetadataCacheTest, AllowPrimaryReadsBasic) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // we expect round-robin on all the servers (PRIMARY and SECONDARY)
+@@ -885,7 +882,7 @@ TEST_F(DestMetadataCacheTest, AllowPrimaryReadsNoSecondary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+   });
+ 
+   // we expect the PRIMARY being used
+@@ -915,8 +912,8 @@ TEST_F(DestMetadataCacheTest, PrimaryDefault) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadWrite, "3307", 3307, 33061},
+   });
+ 
+   // default for PRIMARY should be round-robin on ReadWrite servers
+@@ -953,9 +950,9 @@ TEST_F(DestMetadataCacheTest, SecondaryDefault) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // default for SECONDARY should be round-robin on ReadOnly servers
+@@ -993,9 +990,9 @@ TEST_F(DestMetadataCacheTest, PrimaryAndSecondaryDefault) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
+-      {GR, "uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33061},
++      {"uuid3", metadata_cache::ServerMode::ReadOnly, "3308", 3308, 33062},
+   });
+ 
+   // default for PRIMARY_AND_SECONDARY should be round-robin on ReadOnly and
+@@ -1054,8 +1051,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodesNoPrimary) {
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   });
+ 
+   EXPECT_CALL(metadata_cache_api_, add_acceptor_handler_listener(_));
+@@ -1064,8 +1061,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodesNoPrimary) {
+ 
+   // new metadata - no primary
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadOnly, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadOnly, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   });
+ 
+   bool callback_called{false};
+@@ -1100,8 +1097,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodes2Primaries) {
+       &metadata_cache_api_);
+ 
+   InstanceVector instances{
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   };
+ 
+   fill_instance_vector(instances);
+@@ -1156,8 +1153,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodesNoSecondaries) {
+       &metadata_cache_api_);
+ 
+   InstanceVector instances{
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   };
+ 
+   fill_instance_vector(instances);
+@@ -1210,8 +1207,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodesSecondaryDisconnectToPromoted) {
+       &metadata_cache_api_);
+ 
+   InstanceVector instances{
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   };
+ 
+   fill_instance_vector(instances);
+@@ -1269,8 +1266,8 @@ TEST_F(DestMetadataCacheTest, AllowedNodesSecondaryDisconnectToPromotedTwice) {
+       &metadata_cache_api_);
+ 
+   InstanceVector instances{
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   };
+ 
+   fill_instance_vector(instances);
+@@ -1319,8 +1316,8 @@ TEST_F(DestMetadataCacheTest,
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   });
+ 
+   EXPECT_CALL(metadata_cache_api_, add_acceptor_handler_listener(_));
+@@ -1369,8 +1366,8 @@ TEST_F(DestMetadataCacheTest,
+       &metadata_cache_api_);
+ 
+   fill_instance_vector({
+-      {GR, "uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
+-      {GR, "uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
++      {"uuid1", metadata_cache::ServerMode::ReadWrite, "3306", 3306, 33060},
++      {"uuid2", metadata_cache::ServerMode::ReadOnly, "3307", 3307, 33070},
+   });
+ 
+   EXPECT_CALL(metadata_cache_api_, add_acceptor_handler_listener(_));
+-- 
+2.37.2
+

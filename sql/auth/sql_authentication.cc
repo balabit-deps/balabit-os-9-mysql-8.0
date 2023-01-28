@@ -75,6 +75,7 @@
 #include "sql/auth/sql_security_ctx.h"
 #include "sql/conn_handler/connection_handler_manager.h"  // Connection_handler_manager
 #include "sql/current_thd.h"                              // current_thd
+#include "sql/debug_sync.h"                               // DEBUG_SYNC
 #include "sql/derror.h"                                   // ER_THD
 #include "sql/hostname_cache.h"  // Host_errors, inc_host_errors
 #include "sql/log.h"             // query_logger
@@ -154,20 +155,19 @@ struct MEM_ROOT;
   "Authentication method switch" --> [ Client does not know requested auth method ] DISCONNECT
   "Authentication method switch" --> "Authentication exchange continuation"
 
+  "Authentication exchange continuation" --> "Server Response"
   "Authentication exchange continuation" --> [ No more factors to authenticate] OK
   "Authentication exchange continuation" --> ERR
 
   "Server Response" --> "Authenticate 2nd Factor"
-  "Client Response" --> "Authentication exchange continuation"
-
-  "Authentication exchange continuation" --> [ No more factors to authenticate] OK
-  "Authentication exchange continuation" --> ERR
-
   "Server Response" --> "Authenticate 3rd Factor"
-  "Client Response" --> "Authentication exchange continuation"
 
-  "Authentication exchange continuation" --> OK
-  "Authentication exchange continuation" --> ERR
+  "Authenticate 2nd Factor" --> "MFA Authentication Client Response"
+
+  "Authenticate 3rd Factor" --> "MFA Authentication Client Response"
+
+  "MFA Authentication Client Response" --> "Authentication exchange continuation"
+  "MFA Authentication Client Response" --> [ Client does not know requested auth method ] DISCONNECT
 
   @enduml
 
@@ -1205,7 +1205,7 @@ bool Rsa_authentication_keys::read_key_file(RSA **key_ptr, bool is_priv_key,
         OpenSSL thread's error queue.
       */
       ERR_clear_error();
-
+      fclose(key_file);
       return true;
     }
 
@@ -3419,6 +3419,8 @@ static int do_auth_once(THD *thd, const LEX_CSTRING &auth_plugin_name,
   10.Z authentication method packets are exchanged
   11.The server responds with an @ref page_protocol_basic_ok_packet
 
+  @note At any point, if the Nth Authentication Method fails, the server can return ERR and disconnect.
+    And the client can just disconnect.
 
   @startuml
   Client -> Server: Connect
@@ -3477,6 +3479,8 @@ static int do_multi_factor_auth(THD *thd, MPVIO_EXT *mpvio) {
       mpvio->auth_info.current_auth_factor = 1;
     else if (af->get_factor() == nthfactor::THIRD_FACTOR)
       mpvio->auth_info.current_auth_factor = 2;
+    /* reset cached_client_reply for 2nd and 3rd factors */
+    mpvio->cached_client_reply.pkt = nullptr;
     plugin_ref plugin = my_plugin_lock_by_name(thd, af->plugin_name(),
                                                MYSQL_AUTHENTICATION_PLUGIN);
     if (plugin) {
@@ -3864,6 +3868,7 @@ int acl_authenticate(THD *thd, enum_server_command command) {
 #ifdef HAVE_PSI_THREAD_INTERFACE
   PSI_THREAD_CALL(set_connection_type)(thd->get_vio_type());
 #endif /* HAVE_PSI_THREAD_INTERFACE */
+
   {
     Security_context *sctx = thd->security_context();
     const ACL_USER *acl_user = mpvio.acl_user;
@@ -4064,8 +4069,19 @@ int acl_authenticate(THD *thd, enum_server_command command) {
         goto end;
       }
 
-      if (opt_require_secure_transport &&
-          !is_secure_transport(thd->active_vio->type)) {
+      DBUG_EXECUTE_IF("before_secure_transport_check", {
+        const char act[] = "now SIGNAL kill_now WAIT_FOR killed";
+        assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
+      });
+
+      /*
+        The assumption here is that thd->active_vio and thd->net.vio are both
+        the same at this point. We should not use thd->active_vio at any cost,
+        as a KILL command can shutdown the active_vio i.e., making it a nullptr
+        which would cause issues. Instead we check the net.vio type.
+      */
+      if (opt_require_secure_transport && thd->get_net()->vio != nullptr &&
+          !is_secure_transport(thd->get_net()->vio->type)) {
         my_error(ER_SECURE_TRANSPORT_REQUIRED, MYF(0));
         goto end;
       }
@@ -4580,6 +4596,30 @@ class FileCloser {
 */
 
 bool init_rsa_keys(void) {
+  if ((strcmp(auth_rsa_private_key_path, AUTH_DEFAULT_RSA_PRIVATE_KEY) == 0 &&
+       strcmp(auth_rsa_public_key_path, AUTH_DEFAULT_RSA_PUBLIC_KEY) == 0) ||
+      (strcmp(caching_sha2_rsa_private_key_path,
+              AUTH_DEFAULT_RSA_PRIVATE_KEY) == 0 &&
+       strcmp(caching_sha2_rsa_public_key_path, AUTH_DEFAULT_RSA_PUBLIC_KEY) ==
+           0)) {
+    /**
+      Presence of only a private key file and a public temp file implies that
+      server crashed after creating the private key file and could not create a
+      public key file. Hence removing the private key file.
+    */
+    if (access(AUTH_DEFAULT_RSA_PRIVATE_KEY, F_OK) == 0 &&
+        access(AUTH_DEFAULT_RSA_PUBLIC_KEY, F_OK) == -1) {
+      if (access((std::string{AUTH_DEFAULT_RSA_PUBLIC_KEY} + ".temp").c_str(),
+                 F_OK) == 0 &&
+          access((std::string{AUTH_DEFAULT_RSA_PRIVATE_KEY} + ".temp").c_str(),
+                 F_OK) == -1)
+        remove(AUTH_DEFAULT_RSA_PRIVATE_KEY);
+    }
+    // Removing temp files
+    remove((std::string{AUTH_DEFAULT_RSA_PRIVATE_KEY} + ".temp").c_str());
+    remove((std::string{AUTH_DEFAULT_RSA_PUBLIC_KEY} + ".temp").c_str());
+  }
+
   if (!do_auto_rsa_keys_generation()) return true;
 
   if (!(g_sha256_rsa_keys = new Rsa_authentication_keys(
@@ -5071,6 +5111,8 @@ File_IO &File_IO::operator<<(const Sql_string_t &output_string) {
                    reinterpret_cast<const uchar *>(output_string.data()),
                    output_string.length(), MYF(MY_NABP | MY_WME)))
     set_error();
+  else
+    my_sync(m_file, MYF(MY_WME));
 
   close();
   return *this;
@@ -5620,13 +5662,15 @@ bool create_RSA_key_pair(RSA_generator_func &rsa_gen,
                          const Sql_string_t priv_key_filename,
                          const Sql_string_t pub_key_filename,
                          File_creation_func &filecr) {
+  std::string temp_priv_key_filename = priv_key_filename + ".temp";
+  std::string temp_pub_key_filename = pub_key_filename + ".temp";
   bool ret_val = true;
   File_IO *priv_key_file_ostream = nullptr;
   File_IO *pub_key_file_ostream = nullptr;
   MY_MODE file_creation_mode = get_file_perm(USER_READ | USER_WRITE);
   MY_MODE saved_umask = umask(~(file_creation_mode));
 
-  assert(priv_key_filename.size() && pub_key_filename.size());
+  assert(temp_priv_key_filename.size() && temp_pub_key_filename.size());
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
   EVP_PKEY *rsa;
@@ -5652,10 +5696,12 @@ bool create_RSA_key_pair(RSA_generator_func &rsa_gen,
     ret_val = false;
     goto end;
   }
+  DBUG_EXECUTE_IF("no_key_files", DBUG_SUICIDE(););
 
-  priv_key_file_ostream = filecr(priv_key_filename, file_creation_mode);
+  priv_key_file_ostream = filecr(temp_priv_key_filename, file_creation_mode);
+  DBUG_EXECUTE_IF("empty_priv_key_temp_file", DBUG_SUICIDE(););
+
   (*priv_key_file_ostream) << rsa_priv_key_write(rsa);
-
   DBUG_EXECUTE_IF("key_file_write_error",
                   { priv_key_file_ostream->set_error(); });
   if (priv_key_file_ostream->get_error()) {
@@ -5663,15 +5709,20 @@ bool create_RSA_key_pair(RSA_generator_func &rsa_gen,
     ret_val = false;
     goto end;
   }
-  if (my_chmod(priv_key_filename.c_str(), USER_READ | USER_WRITE,
+  if (my_chmod(temp_priv_key_filename.c_str(), USER_READ | USER_WRITE,
                MYF(MY_FAE + MY_WME))) {
     LogErr(ERROR_LEVEL, ER_X509_CANT_CHMOD_KEY, priv_key_filename.c_str());
     ret_val = false;
     goto end;
   }
+  DBUG_EXECUTE_IF("valid_priv_key_temp_file", DBUG_SUICIDE(););
 
-  pub_key_file_ostream = filecr(pub_key_filename);
+  pub_key_file_ostream = filecr(temp_pub_key_filename);
+  DBUG_EXECUTE_IF("valid_priv_key_temp_file_empty_pub_key_temp_file",
+                  DBUG_SUICIDE(););
+
   (*pub_key_file_ostream) << rsa_pub_key_write(rsa);
+
   DBUG_EXECUTE_IF("cert_pub_key_write_error",
                   { pub_key_file_ostream->set_error(); });
 
@@ -5680,13 +5731,20 @@ bool create_RSA_key_pair(RSA_generator_func &rsa_gen,
     ret_val = false;
     goto end;
   }
-  if (my_chmod(pub_key_filename.c_str(),
+  if (my_chmod(temp_pub_key_filename.c_str(),
                USER_READ | USER_WRITE | GROUP_READ | OTHERS_READ,
                MYF(MY_FAE + MY_WME))) {
     LogErr(ERROR_LEVEL, ER_X509_CANT_CHMOD_KEY, pub_key_filename.c_str());
     ret_val = false;
     goto end;
   }
+  DBUG_EXECUTE_IF("valid_key_temp_files", DBUG_SUICIDE(););
+
+  rename(temp_priv_key_filename.c_str(), priv_key_filename.c_str());
+  DBUG_EXECUTE_IF("valid_pub_key_temp_file_valid_priv_key_file",
+                  DBUG_SUICIDE(););
+  rename(temp_pub_key_filename.c_str(), pub_key_filename.c_str());
+  DBUG_EXECUTE_IF("valid_key_files", DBUG_SUICIDE(););
 
 end:
   if (rsa)

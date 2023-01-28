@@ -1,0 +1,62 @@
+From 648e26a45f544d2af369e06e5872409e96d36385 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:06:01 -0500
+Subject: [PATCH 33/86] Revert "Bug#34699246
+ routertest_integration_routing_sharing fails after renames [postfix]"
+
+This reverts commit d2bdce9fe3237efe0ab7111f76a772cb20901312.
+---
+ router/tests/integration/test_routing_sharing.cc | 16 ++++++----------
+ 1 file changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/router/tests/integration/test_routing_sharing.cc b/router/tests/integration/test_routing_sharing.cc
+index 79e4e646add..2a166a58832 100644
+--- a/router/tests/integration/test_routing_sharing.cc
++++ b/router/tests/integration/test_routing_sharing.cc
+@@ -76,7 +76,6 @@ using namespace std::chrono_literals;
+ using namespace std::string_view_literals;
+ 
+ using ::testing::AllOf;
+-using ::testing::AnyOf;
+ using ::testing::Contains;
+ using ::testing::ElementsAre;
+ using ::testing::IsEmpty;
+@@ -6439,8 +6438,7 @@ TEST_P(ShareConnectionTest, classic_protocol_binlog_dump_fail_no_checksum) {
+       ASSERT_ERROR(res);
+       EXPECT_EQ(res.error().value(), 1236) << res.error();
+       EXPECT_THAT(res.error().message(),
+-                  AnyOf(StartsWith("Slave can not handle"),
+-                        StartsWith("Replica can not handle")))
++                  ::testing::StartsWith("Replica can not handle"))
+           << res.error();
+     }
+   }
+@@ -6534,8 +6532,7 @@ TEST_P(ShareConnectionTest,
+       ASSERT_ERROR(res);
+       EXPECT_EQ(res.error().value(), 1236) << res.error();
+       EXPECT_THAT(res.error().message(),
+-                  AnyOf(StartsWith("Slave can not handle"),
+-                        StartsWith("Replica can not handle")))
++                  ::testing::StartsWith("Replica can not handle"))
+           << res.error();
+     }
+   }
+@@ -6574,11 +6571,10 @@ TEST_P(ShareConnectionTest,
+     auto res = cli.binlog_fetch(rpl);
+     ASSERT_ERROR(res);
+     EXPECT_EQ(res.error().value(), 1236) << res.error();
+-    EXPECT_THAT(res.error().message(),
+-                AnyOf(StartsWith("Client requested master to start replication "
+-                                 "from position < 4"),
+-                      StartsWith("Client requested source to start replication "
+-                                 "from position < 4")))
++    EXPECT_THAT(
++        res.error().message(),
++        ::testing::StartsWith(
++            "Client requested source to start replication from position < 4"))
+         << res.error();
+   }
+ 
+-- 
+2.37.2
+

@@ -454,6 +454,7 @@ void delegates_update_lock_type() {
   plugins add to thd->lex will be automatically unlocked.
  */
 #define FOREACH_OBSERVER(r, f, args)                                   \
+  r = 0;                                                               \
   Prealloced_array<plugin_ref, 8> plugins(PSI_NOT_INSTRUMENTED);       \
   read_lock();                                                         \
   Observer_info_iterator iter = observer_info_iter();                  \
@@ -466,8 +467,7 @@ void delegates_update_lock_type() {
                              : my_plugin_lock(0, &info->plugin));      \
     if (!plugin) {                                                     \
       /* plugin is not initialized or deleted, this is not an error */ \
-      r = 0;                                                           \
-      break;                                                           \
+      continue;                                                        \
     }                                                                  \
     if (!replication_optimize_for_static_plugin_config)                \
       plugins.push_back(plugin);                                       \
@@ -495,6 +495,7 @@ void delegates_update_lock_type() {
   if (!plugins.empty()) plugin_unlock_list(0, &plugins[0], plugins.size());
 
 #define FOREACH_OBSERVER_ERROR_OUT(r, f, args, out)                    \
+  r = 0;                                                               \
   Prealloced_array<plugin_ref, 8> plugins(PSI_NOT_INSTRUMENTED);       \
   read_lock();                                                         \
   Observer_info_iterator iter = observer_info_iter();                  \
@@ -509,12 +510,14 @@ void delegates_update_lock_type() {
                              : my_plugin_lock(0, &info->plugin));      \
     if (!plugin) {                                                     \
       /* plugin is not initialized or deleted, this is not an error */ \
-      r = 0;                                                           \
-      break;                                                           \
+      continue;                                                        \
     }                                                                  \
     if (!replication_optimize_for_static_plugin_config)                \
       plugins.push_back(plugin);                                       \
                                                                        \
+    if (nullptr == ((Observer *)info->observer)->f) {                  \
+      continue;                                                        \
+    }                                                                  \
     bool hook_error = false;                                           \
     hook_error = ((Observer *)info->observer)->f(args, error_out);     \
                                                                        \
@@ -1377,7 +1380,7 @@ static bool is_show_status(enum_sql_command sql_command) {
   }
 }
 
-int launch_hook_trans_begin(THD *thd, TABLE_LIST *all_tables) {
+int launch_hook_trans_begin(THD *thd, Table_ref *all_tables) {
   DBUG_TRACE;
   LEX *lex = thd->lex;
   enum_sql_command sql_command = lex->sql_command;
@@ -1437,7 +1440,7 @@ int launch_hook_trans_begin(THD *thd, TABLE_LIST *all_tables) {
       bool is_sys_db = false;
       bool stop_db_check = false;
 
-      for (TABLE_LIST *table = all_tables; table && !stop_db_check;
+      for (Table_ref *table = all_tables; table && !stop_db_check;
            table = table->next_global) {
         assert(table->db && table->table_name);
 

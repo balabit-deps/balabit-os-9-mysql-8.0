@@ -795,7 +795,6 @@ static void log_files_mark_consumed_files(log_t &log) {
   log_files_access_allowed_validate(log);
 
   const lsn_t oldest_lsn = log_files_oldest_needed_lsn(log);
-  ut_a(log_is_data_lsn(oldest_lsn));
 
   log_files_validate_current_file(log);
 
@@ -1118,6 +1117,7 @@ static void log_files_update_capacity_limits(log_t &log) {
   log.m_capacity.update(log.m_files, logical_size, checkpoint_age);
 
   log_update_limits_low(log);
+  log_update_exported_variables(log);
 }
 
 static bool log_files_consuming_oldest_file_takes_too_long(const log_t &log) {
@@ -2004,6 +2004,7 @@ static void log_files_initialize(log_t &log, lsn_t current_logical_size,
   log.m_capacity.initialize(log.m_files, current_logical_size,
                             current_checkpoint_age);
   log_update_limits_low(log);
+  log_update_exported_variables(log);
 }
 
 void log_files_initialize_on_empty_redo(log_t &log) {

@@ -301,7 +301,8 @@ struct Aligned_alloc_metadata {
   static inline void meta_2(Aligned_alloc_impl::data_segment_ptr data,
                             std::size_t meta_2_v) noexcept {
     assert(meta_2_v <= std::numeric_limits<meta_2_t>::max());
-    memcpy(ptr_to_meta_2(data), &meta_2_v, sizeof(meta_2_t));
+    meta_2_t meta_2_v_typed = meta_2_v;
+    memcpy(ptr_to_meta_2(data), &meta_2_v_typed, sizeof(meta_2_t));
   }
   /** Helper function which recovers the information user previously stored in
       META_1 field.
@@ -494,9 +495,9 @@ struct Aligned_alloc : public allocator_traits<false> {
 
     PFS-wise this allocation routine will be storing the information that PFS
     needs to do its own work:
-     * Owning thread
-     * Total length of bytes allocated
-     * Key
+     - Owning thread
+     - Total length of bytes allocated
+     - Key
 
     Memory layout representation looks like the following:
 
@@ -595,7 +596,7 @@ struct Aligned_alloc_pfs : public allocator_traits<true> {
     // When computing total number of bytes allocated. we must not only account
     // for the size that we have requested (total_len) but we also need
     // to account for extra memory Aligned_alloc_impl may have allocated in
-    // order to be able to accomodate the request. Amount of extra memory
+    // order to be able to accommodate the request. Amount of extra memory
     // allocated corresponds to the offset value returned by Aligned_alloc_impl.
     const auto datalen = total_len + ret.second;
     // The point of this allocator variant is to trace the memory allocations

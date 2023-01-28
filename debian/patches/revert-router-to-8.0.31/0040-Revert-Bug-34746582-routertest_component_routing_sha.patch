@@ -1,0 +1,35 @@
+From a44ab1154023689c4d2422f03d058d417fa51701 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:06:45 -0500
+Subject: [PATCH 40/86] Revert "Bug#34746582
+ routertest_component_routing_sharing fails on windows"
+
+This reverts commit 8cba656415f511bf72500f41a2e0ecb03f588992.
+---
+ router/tests/component/test_routing_sharing.cc | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/router/tests/component/test_routing_sharing.cc b/router/tests/component/test_routing_sharing.cc
+index c5189b32b5f..775e812d519 100644
+--- a/router/tests/component/test_routing_sharing.cc
++++ b/router/tests/component/test_routing_sharing.cc
+@@ -30,7 +30,6 @@
+ 
+ #define RAPIDJSON_HAS_STDSTRING 1
+ 
+-#include "mysql/harness/net_ts/impl/socket.h"
+ #include "rest_api_testutils.h"
+ #include "router/src/routing/tests/mysql_client.h"
+ #include "router_component_test.h"
+@@ -1182,8 +1181,6 @@ INSTANTIATE_TEST_SUITE_P(Spec, RoutingSharingConfigInvalid,
+                          [](auto &info) { return info.param.testname; });
+ 
+ int main(int argc, char *argv[]) {
+-  net::impl::socket::init();  // WSAStartup
+-
+   ProcessManager::set_origin(mysql_harness::Path(argv[0]).dirname());
+   ::testing::InitGoogleTest(&argc, argv);
+   return RUN_ALL_TESTS();
+-- 
+2.37.2
+

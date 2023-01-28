@@ -1,0 +1,212 @@
+From bf841ff0d3c7816ff9201cda9ef3e4a6a5d76be7 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:19:25 -0500
+Subject: [PATCH 64/86] Revert "WL#12772 connection-sharing [13/28] -
+ statistics"
+
+This reverts commit 4a11030c4c820b27baca6f4d020cd99c9663e590.
+---
+ router/src/routing/src/CMakeLists.txt        |   1 -
+ router/src/routing/src/classic_statistics.cc | 114 -------------------
+ router/src/routing/src/classic_statistics.h  |  56 ---------
+ 3 files changed, 171 deletions(-)
+ delete mode 100644 router/src/routing/src/classic_statistics.cc
+ delete mode 100644 router/src/routing/src/classic_statistics.h
+
+diff --git a/router/src/routing/src/CMakeLists.txt b/router/src/routing/src/CMakeLists.txt
+index a04abfadd91..2ebe0556e52 100644
+--- a/router/src/routing/src/CMakeLists.txt
++++ b/router/src/routing/src/CMakeLists.txt
+@@ -59,7 +59,6 @@ ADD_LIBRARY(routing SHARED
+   classic_query.cc
+   classic_quit.cc
+   classic_reset_connection.cc
+-  classic_statistics.cc
+ 
+   sql_value.cc
+ )
+diff --git a/router/src/routing/src/classic_statistics.cc b/router/src/routing/src/classic_statistics.cc
+deleted file mode 100644
+index b1b4747ee83..00000000000
+--- a/router/src/routing/src/classic_statistics.cc
++++ /dev/null
+@@ -1,114 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_statistics.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "classic_lazy_connect.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StatisticsForwarder::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Connect:
+-      return connect();
+-    case Stage::Connected:
+-      return connected();
+-    case Stage::Response:
+-      return response();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StatisticsForwarder::command() {
+-  trace(Tracer::Event().stage("statistics::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    stage(Stage::Connect);
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Response);
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StatisticsForwarder::connect() {
+-  trace(Tracer::Event().stage("statistics::connect"));
+-
+-  stage(Stage::Connected);
+-
+-  connection()->push_processor(std::make_unique<LazyConnector>(
+-      connection(), false /* not in handshake */));
+-
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StatisticsForwarder::connected() {
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    // Connector sent an server::Error already.
+-    auto *socket_splicer = connection()->socket_splicer();
+-    auto src_channel = socket_splicer->client_channel();
+-    auto src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto recv_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!recv_res) return recv_client_failed(recv_res.error());
+-
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("statistics::error"));
+-
+-    stage(Stage::Done);
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("statistics::connected"));
+-
+-  stage(Stage::Response);
+-  return forward_client_to_server();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StatisticsForwarder::response() {
+-  trace(Tracer::Event().stage("statistics::response"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_statistics.h b/router/src/routing/src/classic_statistics.h
+deleted file mode 100644
+index 08811ecea01..00000000000
+--- a/router/src/routing/src/classic_statistics.h
++++ /dev/null
+@@ -1,56 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STATISTICS_INCLUDED
+-#define ROUTING_CLASSIC_STATISTICS_INCLUDED
+-
+-#include "processor.h"
+-
+-class StatisticsForwarder : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Connect,
+-    Connected,
+-    Response,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> connect();
+-  stdx::expected<Result, std::error_code> connected();
+-  stdx::expected<Result, std::error_code> response();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+-- 
+2.37.2
+

@@ -113,7 +113,7 @@
 #include "sql/sql_lex.h"
 #include "sql/sql_locale.h"  // my_locale_by_name
 #include "sql/sql_show.h"    // grant_types
-#include "sql/strfunc.h"     // hexchar_to_int
+#include "sql/strfunc.h"
 #include "sql/system_variables.h"
 #include "sql/table.h"
 #include "sql/val_int_compare.h"  // Integer_value
@@ -141,7 +141,7 @@ using std::vector;
 String *Item_str_func::val_str_from_val_str_ascii(String *str, String *str2) {
   assert(fixed == 1);
 
-  if (!(collation.collation->state & MY_CS_NONASCII)) {
+  if (my_charset_is_ascii_based(collation.collation)) {
     String *res = val_str_ascii(str);
     if (res) res->set_charset(collation.collation);
     return res;
@@ -579,61 +579,54 @@ String *Item_func_aes_encrypt::val_str(String *str) {
   assert(fixed == 1);
   char key_buff[80]{'\0'};
   String tmp_key_value(key_buff, sizeof(key_buff), system_charset_info);
-  String *sptr, *key;
-  int aes_length;
   THD *thd = current_thd;
-  ulong aes_opmode;
   iv_argument iv_arg;
   DBUG_TRACE;
 
-  sptr = args[0]->val_str(str);            // String to encrypt
-  key = args[1]->val_str(&tmp_key_value);  // key
-  aes_opmode = thd->variables.my_aes_mode;
+  String *sptr = args[0]->val_str(str);  // String to encrypt
+  if (sptr == nullptr) return error_str();
 
+  String *key = args[1]->val_str(&tmp_key_value);  // key
+  if (key == nullptr) return error_str();
+
+  my_aes_opmode aes_opmode =
+      static_cast<my_aes_opmode>(thd->variables.my_aes_mode);
   assert(aes_opmode <= MY_AES_END);
 
-  if (sptr && key)  // we need both arguments to be not NULL
-  {
-    const unsigned char *iv_str =
-        iv_arg.retrieve_iv_ptr((enum my_aes_opmode)aes_opmode, arg_count, args,
-                               func_name(), thd, &null_value);
-    if (null_value) return nullptr;
+  const unsigned char *iv_str = iv_arg.retrieve_iv_ptr(
+      aes_opmode, arg_count, args, func_name(), thd, &null_value);
+  if (null_value) return error_str();
 
-    vector<string> kdf_options;
-    kdf_argument kdf_arg;
-    kdf_options =
-        kdf_arg.retrieve_kdf_options(arg_count, args, func_name(), &null_value);
-    if (null_value) {
-      return nullptr;
-    }
-    // Calculate result length
-    aes_length =
-        my_aes_get_size(sptr->length(), (enum my_aes_opmode)aes_opmode);
+  vector<string> kdf_options;
+  kdf_argument kdf_arg;
+  kdf_options =
+      kdf_arg.retrieve_kdf_options(arg_count, args, func_name(), &null_value);
+  if (null_value) return error_str();
 
-    tmp_value.set_charset(&my_charset_bin);
-    const uint rkey_size = my_aes_opmode_key_sizes[aes_opmode] / 8;
-    uint key_size = key->length();
-    if ((key_size > rkey_size) && (kdf_options.size() == 0)) {
-      push_warning_printf(thd, Sql_condition::SL_WARNING, WARN_AES_KEY_SIZE,
-                          ER_THD(thd, WARN_AES_KEY_SIZE), rkey_size);
-    }
-    if (!tmp_value.alloc(aes_length))  // Ensure that memory is free
-    {
-      // finally encrypt directly to allocated buffer.
-      if (my_aes_encrypt((unsigned char *)sptr->ptr(), sptr->length(),
-                         (unsigned char *)tmp_value.ptr(),
-                         (unsigned char *)key->ptr(), key->length(),
-                         (enum my_aes_opmode)aes_opmode, iv_str, true,
-                         (kdf_options.size() > 0) ? &kdf_options : nullptr) ==
-          aes_length) {
-        // We got the expected result length
-        tmp_value.length(static_cast<size_t>(aes_length));
-        return &tmp_value;
-      }
-    }
+  // Calculate result length
+  int aes_length = my_aes_get_size(sptr->length(), aes_opmode);
+
+  tmp_value.set_charset(&my_charset_bin);
+  const uint rkey_size = my_aes_opmode_key_sizes[aes_opmode] / 8;
+  uint key_size = key->length();
+  if ((key_size > rkey_size) && (kdf_options.size() == 0)) {
+    push_warning_printf(thd, Sql_condition::SL_WARNING, WARN_AES_KEY_SIZE,
+                        ER_THD(thd, WARN_AES_KEY_SIZE), rkey_size);
   }
-  null_value = true;
-  return nullptr;
+  if (tmp_value.alloc(aes_length)) return error_str();
+
+  // Finally encrypt directly to allocated buffer.
+  if (my_aes_encrypt(pointer_cast<unsigned char *>(sptr->ptr()), sptr->length(),
+                     pointer_cast<unsigned char *>(tmp_value.ptr()),
+                     pointer_cast<unsigned char *>(key->ptr()), key->length(),
+                     aes_opmode, iv_str, true,
+                     (kdf_options.size() > 0) ? &kdf_options : nullptr) ==
+      aes_length) {
+    // We got the expected result length
+    tmp_value.length(static_cast<size_t>(aes_length));
+    return &tmp_value;
+  }
+  return error_str();
 }
 
 bool Item_func_aes_encrypt::resolve_type(THD *thd) {
@@ -660,51 +653,47 @@ String *Item_func_aes_decrypt::val_str(String *str) {
   assert(fixed == 1);
   char key_buff[80];
   String tmp_key_value(key_buff, sizeof(key_buff), system_charset_info);
-  String *sptr, *key;
   THD *thd = current_thd;
-  ulong aes_opmode;
   iv_argument iv_arg;
   DBUG_TRACE;
 
-  sptr = args[0]->val_str(str);            // String to decrypt
-  key = args[1]->val_str(&tmp_key_value);  // Key
-  aes_opmode = thd->variables.my_aes_mode;
+  String *sptr = args[0]->val_str(str);  // String to decrypt
+  if (sptr == nullptr) return error_str();
+
+  String *key = args[1]->val_str(&tmp_key_value);  // Key
+  if (key == nullptr) return error_str();
+
+  my_aes_opmode aes_opmode =
+      static_cast<my_aes_opmode>(thd->variables.my_aes_mode);
   assert(aes_opmode <= MY_AES_END);
 
-  if (sptr && key)  // Need to have both arguments not NULL
-  {
-    const unsigned char *iv_str =
-        iv_arg.retrieve_iv_ptr((enum my_aes_opmode)aes_opmode, arg_count, args,
-                               func_name(), thd, &null_value);
-    if (null_value) return nullptr;
+  const unsigned char *iv_str = iv_arg.retrieve_iv_ptr(
+      aes_opmode, arg_count, args, func_name(), thd, &null_value);
+  if (null_value) return error_str();
 
-    str_value.set_charset(&my_charset_bin);
-    if (!str_value.alloc(sptr->length()))  // Ensure that memory is free
-    {
-      // finally decrypt directly to allocated buffer.
-      int length;
-      vector<string> kdf_options;
-      kdf_argument kdf_arg;
-      kdf_options = kdf_arg.retrieve_kdf_options(arg_count, args, func_name(),
-                                                 &null_value);
-      if (null_value) {
-        return nullptr;
-      }
-      length = my_aes_decrypt(
-          (unsigned char *)sptr->ptr(), sptr->length(),
-          (unsigned char *)str_value.ptr(), (unsigned char *)key->ptr(),
-          key->length(), (enum my_aes_opmode)aes_opmode, iv_str, true,
-          (kdf_options.size() > 0) ? &kdf_options : nullptr);
-      if (length >= 0)  // if we got correct data data
-      {
-        str_value.length((uint)length);
-        return &str_value;
-      }
-    }
+  str_value.set_charset(&my_charset_bin);
+  if (str_value.alloc(sptr->length())) return error_str();
+
+  // Finally decrypt directly to allocated buffer.
+  int length;
+  vector<string> kdf_options;
+  kdf_argument kdf_arg;
+  kdf_options =
+      kdf_arg.retrieve_kdf_options(arg_count, args, func_name(), &null_value);
+  if (null_value) {
+    return error_str();
   }
-  // Bad parameters. No memory or bad data will all go here
-  null_value = true;
-  return nullptr;
+  length = my_aes_decrypt(
+      pointer_cast<unsigned char *>(sptr->ptr()), sptr->length(),
+      pointer_cast<unsigned char *>(str_value.ptr()),
+      pointer_cast<unsigned char *>(key->ptr()), key->length(), aes_opmode,
+      iv_str, true, (kdf_options.size() > 0) ? &kdf_options : nullptr);
+  if (length >= 0)  // if we got correct data data
+  {
+    str_value.length((uint)length);
+    return &str_value;
+  }
+  return error_str();
 }
 
 bool Item_func_aes_decrypt::resolve_type(THD *thd) {
@@ -1130,8 +1119,11 @@ bool Item_func_concat::resolve_type(THD *thd) {
   if (agg_arg_charsets_for_string_result(collation, args, arg_count))
     return true;
 
-  for (uint i = 0; i < arg_count; i++)
+  for (uint i = 0; i < arg_count; i++) {
+    // Set compare context for use in substitutions
+    args[i]->cmp_context = STRING_RESULT;
     char_length += args[i]->max_char_length(collation.collation);
+  }
 
   set_data_type_string(char_length);
   set_nullable(is_nullable() || max_length > thd->variables.max_allowed_packet);
@@ -1187,9 +1179,11 @@ bool Item_func_concat_ws::resolve_type(THD *thd) {
   assert(arg_count >= 2);
   char_length = (ulonglong)args[0]->max_char_length(collation.collation) *
                 (arg_count - 2);
-  for (uint i = 1; i < arg_count; i++)
+  for (uint i = 1; i < arg_count; i++) {
+    // Set compare context for use in substitutions
+    args[i]->cmp_context = STRING_RESULT;
     char_length += args[i]->max_char_length(collation.collation);
-
+  }
   set_data_type_string(char_length);
   set_nullable(is_nullable() || max_length > thd->variables.max_allowed_packet);
   return false;
@@ -1449,17 +1443,16 @@ bool Item_func_upper::resolve_type(THD *thd) {
 String *Item_func_left::val_str(String *str) {
   assert(fixed == 1);
   String *res = args[0]->val_str(str);
+  if ((null_value = args[0]->null_value)) return error_str();
 
   /* must be longlong to avoid truncation */
   longlong length = args[1]->val_int();
+  if ((null_value = args[1]->null_value)) return error_str();
+
   size_t char_pos;
-
-  if ((null_value = (args[0]->null_value || args[1]->null_value)))
-    return nullptr;
-
   /* if "unsigned_flag" is set, we have a *huge* positive number. */
   if ((length <= 0) && (!args[1]->unsigned_flag)) return make_empty_result();
-  if ((res->length() <= (ulonglong)length) ||
+  if ((res->length() <= static_cast<ulonglong>(length)) ||
       (res->length() <= (char_pos = res->charpos((int)length))))
     return res;
 
@@ -1506,20 +1499,20 @@ bool Item_func_left::resolve_type(THD *thd) {
 String *Item_func_right::val_str(String *str) {
   assert(fixed == 1);
   String *res = args[0]->val_str(str);
+  if ((null_value = args[0]->null_value)) return error_str();
+
   /* must be longlong to avoid truncation */
   longlong length = args[1]->val_int();
-
-  if ((null_value = (args[0]->null_value || args[1]->null_value)))
-    return nullptr; /* purecov: inspected */
+  if ((null_value = args[1]->null_value)) return error_str();
 
   /* if "unsigned_flag" is set, we have a *huge* positive number. */
   if ((length <= 0) && (!args[1]->unsigned_flag))
     return make_empty_result(); /* purecov: inspected */
 
-  if (res->length() <= (ulonglong)length) return res; /* purecov: inspected */
+  if (res->length() <= static_cast<ulonglong>(length)) return res;
 
   size_t start = res->numchars();
-  if (start <= (uint)length) return res;
+  if (start <= static_cast<uint>(length)) return res;
   start = res->charpos(start - (uint)length);
   tmp_value.set(*res, start, res->length() - start);
   return &tmp_value;
@@ -1636,14 +1629,13 @@ String *Item_func_substr_index::val_str(String *str) {
   assert(fixed);
   char buff[MAX_FIELD_WIDTH];
   String tmp(buff, sizeof(buff), system_charset_info);
-  String *res = args[0]->val_str(str);
-  const longlong count = args[2]->val_int();
-  int offset;
 
-  if (args[0]->null_value || args[2]->null_value) {
-    null_value = true;
-    return nullptr;
-  }
+  String *res = args[0]->val_str(str);
+  if ((null_value = args[0]->null_value)) return error_str();
+
+  const longlong count = args[2]->val_int();
+  if ((null_value = args[2]->null_value)) return error_str();
+
   null_value = false;
 
   res->set_charset(collation.collation);
@@ -1716,7 +1708,7 @@ String *Item_func_substr_index::val_str(String *str) {
         Negative index, start counting at the end
       */
       longlong count_ll = count;
-      for (offset = res->length(); offset;) {
+      for (int offset = res->length(); offset;) {
         /*
           this call will result in finding the position pointing to one
           address space less than where the found substring is located
@@ -1737,7 +1729,7 @@ String *Item_func_substr_index::val_str(String *str) {
       if (count_ll != 0) return res;  // Didn't find, return org string
     } else {                          // start counting from the beginning
       ulonglong count_ull = count_val.val_unsigned();
-      for (offset = 0;; offset += delimiter_length) {
+      for (int offset = 0;; offset += delimiter_length) {
         if ((offset = res->strstr(*delimiter, offset)) < 0)
           return res;  // Didn't find, return org string
         if (--count_ull == 0) {
@@ -2594,14 +2586,14 @@ end:
 
 String *Item_func_repeat::val_str(String *str) {
   assert(fixed == 1);
-  size_t length, tot_length;
-  char *to;
+
   /* must be longlong to avoid truncation */
   longlong count = args[1]->val_int();
-  String *res = args[0]->val_str(str);
+  if (args[1]->null_value) return error_str();
 
-  if (args[0]->null_value || args[1]->null_value)
-    return error_str();  // string and/or delim are null
+  String *res = args[0]->val_str(str);
+  if (args[0]->null_value) return error_str();
+
   null_value = false;
 
   if (count <= 0 && (count == 0 || !args[1]->unsigned_flag))
@@ -2615,12 +2607,12 @@ String *Item_func_repeat::val_str(String *str) {
   if ((ulonglong)count > INT_MAX32) count = INT_MAX32;
   if (count == 1)  // To avoid reallocs
     return res;
-  length = res->length();
+  size_t length = res->length();
   // Safe length check
   if (length > current_thd->variables.max_allowed_packet / (uint)count) {
     return push_packet_overflow_warning(current_thd, func_name());
   }
-  tot_length = length * (uint)count;
+  size_t tot_length = length * (uint)count;
   if (res->uses_buffer_owned_by(str)) {
     if (tmp_value.alloc(tot_length) || tmp_value.copy(*res)) return error_str();
     tmp_value.length(tot_length);
@@ -2628,7 +2620,7 @@ String *Item_func_repeat::val_str(String *str) {
   } else if (!(res = alloc_buffer(res, str, &tmp_value, tot_length)))
     return error_str();
 
-  to = res->ptr() + length;
+  char *to = res->ptr() + length;
   while (--count) {
     memcpy(to, res->ptr(), length);
     to += length;
@@ -3009,23 +3001,25 @@ bool Item_func_conv::resolve_type(THD *thd) {
 String *Item_func_conv::val_str(String *str) {
   assert(fixed == 1);
   String *res = args[0]->val_str(str);
-  const char *endptr;
-  longlong dec;
-  int from_base = (int)args[1]->val_int();
-  int to_base = (int)args[2]->val_int();
-  int err;
+  if ((null_value = args[0]->null_value)) return error_str();
+
+  int from_base = args[1]->val_int();
+  if ((null_value = args[1]->null_value)) return error_str();
+
+  int to_base = args[2]->val_int();
+  if ((null_value = args[2]->null_value)) return error_str();
 
   // Note that abs(INT_MIN) is undefined.
-  if (args[0]->null_value || args[1]->null_value || args[2]->null_value ||
-      from_base == INT_MIN || to_base == INT_MIN || abs(to_base) > 36 ||
+  if (from_base == INT_MIN || to_base == INT_MIN || abs(to_base) > 36 ||
       abs(to_base) < 2 || abs(from_base) > 36 || abs(from_base) < 2 ||
       !(res->length())) {
     null_value = true;
-    return nullptr;
+    return error_str();
   }
   null_value = false;
   unsigned_flag = !(from_base < 0);
 
+  longlong dec;
   if (args[0]->data_type() == MYSQL_TYPE_BIT ||
       args[0]->type() == VARBIN_ITEM) {
     /*
@@ -3036,12 +3030,14 @@ String *Item_func_conv::val_str(String *str) {
     */
     dec = args[0]->val_int();
   } else {
+    const char *endptr;
+    int err;
     if (from_base < 0)
       dec = my_strntoll(res->charset(), res->ptr(), res->length(), -from_base,
                         &endptr, &err);
     else
-      dec = (longlong)my_strntoull(res->charset(), res->ptr(), res->length(),
-                                   from_base, &endptr, &err);
+      dec = static_cast<longlong>(my_strntoull(
+          res->charset(), res->ptr(), res->length(), from_base, &endptr, &err));
     if (err) {
       /*
         If we got an overflow from my_strntoull, and the input was negative,
@@ -3100,30 +3096,43 @@ String *Item_func_set_collation::val_str(String *str) {
   return str;
 }
 
-bool Item_func_set_collation::resolve_type(THD *) {
+bool Item_func_set_collation::resolve_type(THD *thd) {
   CHARSET_INFO *set_collation;
-  const char *colname;
   String tmp;
   assert(args[1]->basic_const_item());
   String *str = args[1]->val_str(&tmp);
-  colname = str->c_ptr();
-  if (colname == binary_keyword)
+  const char *colname = str->c_ptr();
+  if (colname == binary_keyword) {
     set_collation = get_charset_by_csname(args[0]->collation.collation->csname,
                                           MY_CS_BINSORT, MYF(0));
-  else {
-    if (!(set_collation = mysqld_collation_get_by_name(colname))) return true;
+    if (set_collation == nullptr) {
+      my_error(ER_COLLATION_CHARSET_MISMATCH, MYF(0), colname,
+               args[0]->collation.collation->csname);
+      return true;
+    }
+  } else {
+    set_collation = mysqld_collation_get_by_name(colname);
+    if (set_collation == nullptr) return true;
   }
 
-  if (set_collation == nullptr ||
-      (!my_charset_same(args[0]->collation.collation, set_collation) &&
-       args[0]->collation.derivation != DERIVATION_NUMERIC)) {
+  if (args[0]->data_type() == MYSQL_TYPE_INVALID &&
+      args[0]->propagate_type(
+          thd, Type_properties(MYSQL_TYPE_VARCHAR, set_collation))) {
+    return true;
+  }
+
+  if (!my_charset_same(args[0]->collation.collation, set_collation) &&
+      args[0]->collation.derivation != DERIVATION_NUMERIC) {
     my_error(ER_COLLATION_CHARSET_MISMATCH, MYF(0), colname,
              args[0]->collation.collation->csname);
     return true;
   }
+
   collation.set(set_collation, DERIVATION_EXPLICIT,
                 args[0]->collation.repertoire);
+
   set_data_type_string(args[0]->max_char_length());
+
   return false;
 }
 
@@ -4308,66 +4317,6 @@ String *Item_func_uuid::val_str(String *str) {
   return mysql_generate_uuid(str);
 }
 
-bool Item_func_gtid_subtract::resolve_type(THD *thd) {
-  if (param_type_is_default(thd, 0, -1)) return true;
-
-  collation.set(default_charset(), DERIVATION_COERCIBLE, MY_REPERTOIRE_ASCII);
-  /*
-    In the worst case, the string grows after subtraction. This
-    happens when a GTID in args[0] is split by a GTID in args[1],
-    e.g., UUID:1-6 minus UUID:3-4 becomes UUID:1-2,5-6.  The worst
-    case is UUID:1-100 minus UUID:9, where the two characters ":9" in
-    args[1] yield the five characters "-8,10" in the result.
-  */
-  set_data_type_string(
-      args[0]->max_length +
-      max<ulonglong>(args[1]->max_length - binary_log::Uuid::TEXT_LENGTH, 0) *
-          5 / 2);
-  return false;
-}
-
-String *Item_func_gtid_subtract::val_str_ascii(String *str) {
-  DBUG_TRACE;
-
-  assert(fixed);
-
-  null_value = false;
-
-  String *str1 = args[0]->val_str_ascii(&buf1);
-  if (str1 == nullptr) {
-    return error_str();
-  }
-  String *str2 = args[1]->val_str_ascii(&buf2);
-  if (str2 == nullptr) {
-    return error_str();
-  }
-
-  const char *charp1 = str1->c_ptr_safe();
-  assert(charp1 != nullptr);
-  const char *charp2 = str2->c_ptr_safe();
-  assert(charp2 != nullptr);
-
-  enum_return_status status;
-
-  Sid_map sid_map(nullptr /*no rwlock*/);
-  // compute sets while holding locks
-  Gtid_set set1(&sid_map, charp1, &status);
-  if (status == RETURN_STATUS_OK) {
-    Gtid_set set2(&sid_map, charp2, &status);
-    size_t length;
-    // subtract, save result, return result
-    if (status == RETURN_STATUS_OK) {
-      set1.remove_gtid_set(&set2);
-      if (!str->mem_realloc((length = set1.get_string_length()) + 1)) {
-        set1.to_string(str->ptr());
-        str->length(length);
-        return str;
-      }
-    }
-  }
-  return error_str();
-}
-
 /**
   @brief
     This function prepares string with list of column privileges.
@@ -5073,7 +5022,7 @@ CHARSET_INFO *mysqld_collation_get_by_name(const char *name,
   CHARSET_INFO *cs;
   MY_CHARSET_LOADER loader;
   char error[1024];
-  my_charset_loader_init_mysys(&loader);
+
   if (!(cs = my_collation_get_by_name(&loader, name, MYF(0)))) {
     ErrConvString err(name, strlen(name), name_cs);
     my_error(ER_UNKNOWN_COLLATION, MYF(0), err.ptr());

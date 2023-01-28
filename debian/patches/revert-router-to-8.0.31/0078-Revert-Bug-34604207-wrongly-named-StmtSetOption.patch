@@ -1,0 +1,164 @@
+From 97a58b9f354285b311ad8cbccde1b7160c837871 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:45 -0500
+Subject: [PATCH 78/86] Revert "Bug#34604207 wrongly named StmtSetOption"
+
+This reverts commit c55ce6597555d0ce1660f5cd0286c87dcb8727cc.
+---
+ .../mysqlrouter/classic_protocol_codec_message.h  |  8 ++++----
+ .../mysqlrouter/classic_protocol_message.h        | 10 +++++-----
+ .../mysql_protocol/tests/test_classic_protocol.cc |  6 +++---
+ .../tests/test_classic_protocol_frame.cc          |  2 +-
+ .../tests/test_classic_protocol_message.cc        | 15 +++++++--------
+ router/src/routing/src/classic_connection.cc      |  5 +++--
+ 6 files changed, 23 insertions(+), 23 deletions(-)
+
+diff --git a/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_codec_message.h b/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_codec_message.h
+index 80c4d380809..3a5d5b6e08d 100644
+--- a/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_codec_message.h
++++ b/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_codec_message.h
+@@ -2260,11 +2260,11 @@ class Codec<message::client::StmtReset>
+ };
+ 
+ /**
+- * codec for client's SetOption command.
++ * codec for client's SetOption Cursor command.
+  */
+ template <>
+-class Codec<message::client::SetOption>
+-    : public impl::EncodeBase<Codec<message::client::SetOption>> {
++class Codec<message::client::StmtSetOption>
++    : public impl::EncodeBase<Codec<message::client::StmtSetOption>> {
+   template <class Accumulator>
+   constexpr auto accumulate_fields(Accumulator &&accu) const {
+     return accu.step(wire::FixedInt<1>(cmd_byte()))
+@@ -2273,7 +2273,7 @@ class Codec<message::client::SetOption>
+   }
+ 
+  public:
+-  using value_type = message::client::SetOption;
++  using value_type = message::client::StmtSetOption;
+   using __base = impl::EncodeBase<Codec<value_type>>;
+ 
+   friend __base;
+diff --git a/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_message.h b/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_message.h
+index 4645f5f55e7..81b1d53c399 100644
+--- a/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_message.h
++++ b/router/src/mysql_protocol/include/mysqlrouter/classic_protocol_message.h
+@@ -974,16 +974,16 @@ constexpr bool operator==(const StmtFetch &a, const StmtFetch &b) {
+ }
+ 
+ /**
+- * set options on the current connection.
++ * fetch rows from an executed statement.
+  */
+-class SetOption {
++class StmtSetOption {
+  public:
+   /**
+-   * construct a SetOption message.
++   * construct a ResetStmt message.
+    *
+    * @param option options to set
+    */
+-  constexpr SetOption(uint16_t option) : option_{option} {}
++  constexpr StmtSetOption(uint16_t option) : option_{option} {}
+ 
+   constexpr uint16_t option() const { return option_; }
+ 
+@@ -991,7 +991,7 @@ class SetOption {
+   uint16_t option_;
+ };
+ 
+-constexpr bool operator==(const SetOption &a, const SetOption &b) {
++constexpr bool operator==(const StmtSetOption &a, const StmtSetOption &b) {
+   return a.option() == b.option();
+ }
+ 
+diff --git a/router/src/mysql_protocol/tests/test_classic_protocol.cc b/router/src/mysql_protocol/tests/test_classic_protocol.cc
+index ccefc16ed41..f64093f2333 100644
+--- a/router/src/mysql_protocol/tests/test_classic_protocol.cc
++++ b/router/src/mysql_protocol/tests/test_classic_protocol.cc
+@@ -168,9 +168,9 @@ static_assert(classic_protocol::Codec<
+ static_assert(classic_protocol::Codec<
+                   classic_protocol::message::client::StmtReset>::cmd_byte() ==
+               0x1a);
+-static_assert(classic_protocol::Codec<
+-                  classic_protocol::message::client::SetOption>::cmd_byte() ==
+-              0x1b);
++static_assert(
++    classic_protocol::Codec<
++        classic_protocol::message::client::StmtSetOption>::cmd_byte() == 0x1b);
+ 
+ static_assert(classic_protocol::Codec<
+                   classic_protocol::message::client::StmtFetch>::cmd_byte() ==
+diff --git a/router/src/mysql_protocol/tests/test_classic_protocol_frame.cc b/router/src/mysql_protocol/tests/test_classic_protocol_frame.cc
+index 4b95dbceb0b..e2edf426521 100644
+--- a/router/src/mysql_protocol/tests/test_classic_protocol_frame.cc
++++ b/router/src/mysql_protocol/tests/test_classic_protocol_frame.cc
+@@ -58,7 +58,7 @@ static_assert(Codec<frame::Frame<message::client::StmtReset>>({0, {1}}, {})
+ static_assert(Codec<frame::Frame<message::client::StmtFetch>>({0, {1, 2}}, {})
+                   .size() == 4 + 1 + 4 + 4);
+ 
+-static_assert(Codec<frame::Frame<message::client::SetOption>>({0, {1}}, {})
++static_assert(Codec<frame::Frame<message::client::StmtSetOption>>({0, {1}}, {})
+                   .size() == 4 + 1 + 2);
+ 
+ // Frame::Quit
+diff --git a/router/src/mysql_protocol/tests/test_classic_protocol_message.cc b/router/src/mysql_protocol/tests/test_classic_protocol_message.cc
+index ff68aa72a3f..943431b5dda 100644
+--- a/router/src/mysql_protocol/tests/test_classic_protocol_message.cc
++++ b/router/src/mysql_protocol/tests/test_classic_protocol_message.cc
+@@ -1138,19 +1138,18 @@ INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientStmtResetTest,
+ 
+ // client::StmtSetOption
+ 
+-using CodecMessageClientSetOptionTest =
+-    CodecTest<classic_protocol::message::client::SetOption>;
++using CodecMessageClientStmtSetOptionTest =
++    CodecTest<classic_protocol::message::client::StmtSetOption>;
+ 
+-TEST_P(CodecMessageClientSetOptionTest, encode) { test_encode(GetParam()); }
+-TEST_P(CodecMessageClientSetOptionTest, decode) { test_decode(GetParam()); }
++TEST_P(CodecMessageClientStmtSetOptionTest, encode) { test_encode(GetParam()); }
++TEST_P(CodecMessageClientStmtSetOptionTest, decode) { test_decode(GetParam()); }
+ 
+-const CodecParam<classic_protocol::message::client::SetOption>
++const CodecParam<classic_protocol::message::client::StmtSetOption>
+     codec_stmt_set_option_param[] = {
+-        {"set_option_0", {0}, {}, {0x1b, 0x00, 0x00}},  // multi-stmts-off
+-        {"set_option_1", {1}, {}, {0x1b, 0x01, 0x00}},  // multi-stmts-on
++        {"set_option_stmt_1", {1}, {}, {0x1b, 0x01, 0x00}},
+ };
+ 
+-INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientSetOptionTest,
++INSTANTIATE_TEST_SUITE_P(Spec, CodecMessageClientStmtSetOptionTest,
+                          ::testing::ValuesIn(codec_stmt_set_option_param),
+                          [](auto const &test_param_info) {
+                            return test_param_info.param.test_name;
+diff --git a/router/src/routing/src/classic_connection.cc b/router/src/routing/src/classic_connection.cc
+index 8fdc82d8249..4b74b4564ca 100644
+--- a/router/src/routing/src/classic_connection.cc
++++ b/router/src/routing/src/classic_connection.cc
+@@ -4174,7 +4174,8 @@ void MysqlRoutingClassicConnection::client_recv_cmd() {
+         cmd_byte<classic_protocol::message::client::StmtParamAppendData>(),
+     StmtClose = cmd_byte<classic_protocol::message::client::StmtClose>(),
+     StmtReset = cmd_byte<classic_protocol::message::client::StmtReset>(),
+-    SetOption = cmd_byte<classic_protocol::message::client::SetOption>(),
++    StmtSetOption =
++        cmd_byte<classic_protocol::message::client::StmtSetOption>(),
+     StmtFetch = cmd_byte<classic_protocol::message::client::StmtFetch>(),
+     BinlogDumpGtid =
+         cmd_byte<classic_protocol::message::client::BinlogDumpGtid>(),
+@@ -4214,7 +4215,7 @@ void MysqlRoutingClassicConnection::client_recv_cmd() {
+       return cmd_stmt_close();
+     case Msg::StmtFetch:
+       return cmd_stmt_fetch();
+-    case Msg::SetOption:
++    case Msg::StmtSetOption:
+       return cmd_stmt_set_option();
+     case Msg::StmtReset:
+       return cmd_stmt_reset();
+-- 
+2.37.2
+

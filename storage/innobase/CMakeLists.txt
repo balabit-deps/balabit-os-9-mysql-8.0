@@ -261,6 +261,25 @@ IF(MY_COMPILER_IS_GNU AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
     COMPILE_FLAGS "-Wno-free-nonheap-object")
 ENDIF()
 
+# The combination of
+# ut_ad(strlen(dir_path) + 1 + strlen(dir_name) + 1 < sizeof(path))
+# and
+# snprintf(path, sizeof(path), "%s%c%s", dir_path, OS_PATH_SEPARATOR, dir_name);
+# gives a warning: -Werror=format-truncation=
+IF(MY_COMPILER_IS_GNU AND
+    CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11 AND
+    CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG" AND
+    CMAKE_CXX_FLAGS MATCHES " -O2 ")
+  ADD_COMPILE_FLAGS(arch/arch0arch.cc COMPILE_FLAGS "-Wformat-truncation=0")
+ENDIF()
+
+IF(MSVC)
+  # TODO(Bug#33985941): update the code and remove the disabled warnings
+  MY_ADD_COMPILE_DEFINITIONS(os/os0file.cc
+    COMPILE_DEFINITIONS "_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING"
+    )
+ENDIF()
+
 IF(MSVC AND NOT WIN32_CLANG)
   # Disable C4505: unreferenced local function has been removed
   ADD_COMPILE_FLAGS(pars/lexyy.cc COMPILE_FLAGS "/wd4505")
@@ -336,6 +355,11 @@ IF(HAS_WARN_FLAG)
     COMPILE_FLAGS "${HAS_WARN_FLAG}")
 ENDIF()
 MY_CHECK_CXX_COMPILER_WARNING("-Wcast-function-type" HAS_WARN_FLAG)
+IF(HAS_WARN_FLAG)
+  ADD_COMPILE_FLAGS(fts/fts0pars.cc
+    COMPILE_FLAGS "${HAS_WARN_FLAG}")
+ENDIF()
+MY_CHECK_CXX_COMPILER_WARNING("-Wunused-but-set-variable" HAS_WARN_FLAG)
 IF(HAS_WARN_FLAG)
   ADD_COMPILE_FLAGS(fts/fts0pars.cc
     COMPILE_FLAGS "${HAS_WARN_FLAG}")

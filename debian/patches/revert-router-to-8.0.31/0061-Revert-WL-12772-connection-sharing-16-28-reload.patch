@@ -1,0 +1,256 @@
+From ced154bc7d4bdc0f380c227dc155a38158bbdd99 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:19:10 -0500
+Subject: [PATCH 61/86] Revert "WL#12772 connection-sharing [16/28] - reload"
+
+This reverts commit 60ce7cf029332df273166ebfc57a0f137981de71.
+---
+ router/src/routing/src/CMakeLists.txt    |   1 -
+ router/src/routing/src/classic_reload.cc | 154 -----------------------
+ router/src/routing/src/classic_reload.h  |  61 ---------
+ 3 files changed, 216 deletions(-)
+ delete mode 100644 router/src/routing/src/classic_reload.cc
+ delete mode 100644 router/src/routing/src/classic_reload.h
+
+diff --git a/router/src/routing/src/CMakeLists.txt b/router/src/routing/src/CMakeLists.txt
+index 2bb292b3eca..b6f148f2e03 100644
+--- a/router/src/routing/src/CMakeLists.txt
++++ b/router/src/routing/src/CMakeLists.txt
+@@ -60,7 +60,6 @@ ADD_LIBRARY(routing SHARED
+   classic_ping.cc
+   classic_query.cc
+   classic_quit.cc
+-  classic_reload.cc
+   classic_reset_connection.cc
+   classic_statistics.cc
+ 
+diff --git a/router/src/routing/src/classic_reload.cc b/router/src/routing/src/classic_reload.cc
+deleted file mode 100644
+index c47c380be95..00000000000
+--- a/router/src/routing/src/classic_reload.cc
++++ /dev/null
+@@ -1,154 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_reload.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "classic_lazy_connect.h"
+-#include "harness_assert.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "mysqlrouter/classic_protocol_message.h"
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Connect:
+-      return connect();
+-    case Stage::Connected:
+-      return connected();
+-    case Stage::Response:
+-      return response();
+-    case Stage::Ok:
+-      return ok();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::command() {
+-  trace(Tracer::Event().stage("reload::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    stage(Stage::Connect);
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Response);
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::connect() {
+-  trace(Tracer::Event().stage("reload::connect"));
+-
+-  stage(Stage::Connected);
+-
+-  connection()->push_processor(std::make_unique<LazyConnector>(
+-      connection(), false /* not in handshake */));
+-
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-ReloadForwarder::connected() {
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    // Connector sent an server::Error already.
+-    auto *socket_splicer = connection()->socket_splicer();
+-    auto src_channel = socket_splicer->client_channel();
+-    auto src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto recv_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!recv_res) return recv_client_failed(recv_res.error());
+-
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("reload::error"));
+-
+-    stage(Stage::Done);
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("reload::connected"));
+-
+-  stage(Stage::Response);
+-  return forward_client_to_server();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::response() {
+-  trace(Tracer::Event().stage("reload::response"));
+-
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Ok = ClassicFrame::cmd_byte<classic_protocol::message::server::Ok>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Ok:
+-      stage(Stage::Ok);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::ok() {
+-  trace(Tracer::Event().stage("reload::ok"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> ReloadForwarder::error() {
+-  trace(Tracer::Event().stage("reload::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_reload.h b/router/src/routing/src/classic_reload.h
+deleted file mode 100644
+index 0a4b5ba07be..00000000000
+--- a/router/src/routing/src/classic_reload.h
++++ /dev/null
+@@ -1,61 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_RELOAD_INCLUDED
+-#define ROUTING_CLASSIC_RELOAD_INCLUDED
+-
+-#include "mysqlrouter/classic_protocol_constants.h"
+-#include "processor.h"
+-
+-class ReloadForwarder : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Connect,
+-    Connected,
+-    Response,
+-    Ok,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> connect();
+-  stdx::expected<Result, std::error_code> connected();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> ok();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+-- 
+2.37.2
+

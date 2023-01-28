@@ -1,0 +1,140 @@
+From 4248f93f8d50194f592232a4eb6f468053104c51 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:06:57 -0500
+Subject: [PATCH 42/86] Revert "Bug#34733655 Rename MySQLRouting::start() and
+ ::start_acceptor()"
+
+This reverts commit 3837af0cbca4652719d812702b24227e37143d01.
+---
+ router/src/routing/src/mysql_routing.cc  |  8 ++++----
+ router/src/routing/src/mysql_routing.h   | 25 ++++++++++++------------
+ router/src/routing/src/routing_plugin.cc |  4 ++--
+ 3 files changed, 18 insertions(+), 19 deletions(-)
+
+diff --git a/router/src/routing/src/mysql_routing.cc b/router/src/routing/src/mysql_routing.cc
+index 637e066372b..89aadf930b0 100644
+--- a/router/src/routing/src/mysql_routing.cc
++++ b/router/src/routing/src/mysql_routing.cc
+@@ -148,7 +148,7 @@ MySQLRouting::MySQLRouting(
+ #endif
+ 
+   // This test is only a basic assertion.  Calling code is expected to check the
+-  // validity of these arguments more thoroughly. At the time of writing,
++  // validity of these arguments more thoroughally. At the time of writing,
+   // routing_plugin.cc : init() is one such place.
+   if (!context_.get_bind_address().port() && !named_socket.is_set()) {
+     throw std::invalid_argument(
+@@ -157,7 +157,7 @@ MySQLRouting::MySQLRouting(
+   }
+ }
+ 
+-void MySQLRouting::run(mysql_harness::PluginFuncEnv *env) {
++void MySQLRouting::start(mysql_harness::PluginFuncEnv *env) {
+   my_thread_self_setname(get_routing_thread_name(context_.get_name(), "RtM")
+                              .c_str());  // "Rt main" would be too long :(
+   if (context_.get_bind_address().port() > 0) {
+@@ -186,7 +186,7 @@ void MySQLRouting::run(mysql_harness::PluginFuncEnv *env) {
+ #endif
+   if (context_.get_bind_address().port() > 0 ||
+       context_.get_bind_named_socket().is_set()) {
+-    auto res = run_acceptor(env);
++    auto res = start_acceptor(env);
+     if (!res) {
+       clear_running(env);
+       throw std::runtime_error(
+@@ -564,7 +564,7 @@ std::string MySQLRouting::get_port_str() const {
+   return port_str;
+ }
+ 
+-stdx::expected<void, std::error_code> MySQLRouting::run_acceptor(
++stdx::expected<void, std::error_code> MySQLRouting::start_acceptor(
+     mysql_harness::PluginFuncEnv *env) {
+   destination_->start(env);
+   destination_->register_start_router_socket_acceptor(
+diff --git a/router/src/routing/src/mysql_routing.h b/router/src/routing/src/mysql_routing.h
+index 5835cb6daa1..395c14d1336 100644
+--- a/router/src/routing/src/mysql_routing.h
++++ b/router/src/routing/src/mysql_routing.h
+@@ -96,8 +96,8 @@ struct Nothing {};
+  *
+  *  Connection routing will not analyze or parse any MySQL package (except from
+  *  those in the handshake phase to be able to discover invalid connection
+- *  error) nor will it do any authentication. It will not handle errors from the
+- *  MySQL server and not automatically recover. The client communicate through
++ * error) nor will it do any authentication. It will not handle errors from the
++ * MySQL server and not automatically recover. The client communicate through
+  *  MySQL Router just like it would directly connecting.
+  *
+  *  The MySQL Server is chosen from a given list of hosts or IP addresses
+@@ -109,12 +109,10 @@ struct Nothing {};
+  *
+  *  Example usage: bind to all IP addresses and use TCP Port 7001
+  *
+- *  @code
+- *      MySQLRouting r(routing::AccessMode::kReadWrite, "0.0.0.0", 7001);
+- *      r.destination_connect_timeout = std::chrono::seconds(1);
+- *      r.set_destinations_from_csv("10.0.10.5;10.0.11.6");
+- *      r.run();
+- *  @endcode
++ *   MySQLRouting r(routing::AccessMode::kReadWrite, "0.0.0.0", 7001);
++ *   r.destination_connect_timeout = std::chrono::seconds(1);
++ *   r.set_destinations_from_csv("10.0.10.5;10.0.11.6");
++ *   r.start();
+  *
+  *  The above example will, when MySQL running on 10.0.10.5 is not available,
+  *  use 10.0.11.6 to setup the connection routing.
+@@ -169,15 +167,16 @@ class ROUTING_EXPORT MySQLRouting : public MySQLRoutingBase {
+       std::chrono::milliseconds connection_sharing_delay =
+           routing::kDefaultConnectionSharingDelay);
+ 
+-  /** @brief Runs the service and accept incoming connections
++  /** @brief Starts the service and accept incoming connections
+    *
+-   * Runs the connection routing service and starts accepting incoming
+-   * MySQL client connections.
++   * Starts the connection routing service and start accepting incoming
++   * MySQL client connections. Each connection will be further handled
++   * in a separate thread.
+    *
+    * @throw std::runtime_error on errors.
+    *
+    */
+-  void run(mysql_harness::PluginFuncEnv *env);
++  void start(mysql_harness::PluginFuncEnv *env);
+ 
+   /** @brief Sets the destinations from URI
+    *
+@@ -316,7 +315,7 @@ class ROUTING_EXPORT MySQLRouting : public MySQLRoutingBase {
+    */
+   static void set_unix_socket_permissions(const char *socket_file);
+ 
+-  stdx::expected<void, std::error_code> run_acceptor(
++  stdx::expected<void, std::error_code> start_acceptor(
+       mysql_harness::PluginFuncEnv *env);
+ 
+  public:
+diff --git a/router/src/routing/src/routing_plugin.cc b/router/src/routing/src/routing_plugin.cc
+index 32e6960a7ff..2061642de27 100644
+--- a/router/src/routing/src/routing_plugin.cc
++++ b/router/src/routing/src/routing_plugin.cc
+@@ -462,7 +462,7 @@ static void start(mysql_harness::PluginFuncEnv *env) {
+       MySQLRoutingComponent::get_instance().erase(section_key);
+     }};
+ 
+-    r->run(env);
++    r->start(env);
+   } catch (const std::invalid_argument &exc) {
+     set_error(env, mysql_harness::kConfigInvalidArgument, "%s", exc.what());
+   } catch (const std::runtime_error &exc) {
+@@ -473,7 +473,7 @@ static void start(mysql_harness::PluginFuncEnv *env) {
+   }
+ 
+   {
+-    // as the r->run() shuts down all in parallel, synchronize the access to
++    // as the r->start() shuts down all in parallel, synchronize the access to
+     std::lock_guard<std::mutex> lk(io_context_work_guard_mtx);
+ 
+     io_context_work_guards.erase(io_context_work_guards.begin());
+-- 
+2.37.2
+

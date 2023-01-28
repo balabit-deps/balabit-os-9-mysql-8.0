@@ -53,7 +53,13 @@ if(CYGWIN OR MSYS)
 endif()
 
 if(WIN32)
+  IF(WIN32_CLANG)
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
+    STRING_APPEND(CMAKE_C_FLAGS
+      " -Wno-tautological-constant-out-of-range-compare")
+  ELSE()
 	add_definitions(-DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600)
+  ENDIF()
 endif()
 
 if(APPLE)
@@ -303,6 +309,9 @@ if(CMAKE_COMPILER_IS_GNUCC)
 endif()
 
 DISABLE_MISSING_PROFILE_WARNING()
+IF(MY_COMPILER_IS_GNU_OR_CLANG)
+  STRING_APPEND(CMAKE_C_FLAGS " -Wno-strict-prototypes")
+ENDIF()
 
 # Decide which keyword to use for thread-local storage.
 if(CMAKE_COMPILER_IS_GNUCC OR

@@ -96,13 +96,6 @@ The tablespace memory cache */
 using Dirs = std::vector<std::string>;
 using Space_id_set = std::set<space_id_t>;
 
-constexpr char Fil_path::DB_SEPARATOR;
-constexpr char Fil_path::OS_SEPARATOR;
-constexpr const char *Fil_path::SEPARATOR;
-constexpr const char *Fil_path::DOT_SLASH;
-constexpr const char *Fil_path::DOT_DOT_SLASH;
-constexpr const char *Fil_path::SLASH_DOT_DOT_SLASH;
-
 dberr_t dict_stats_rename_table(const char *old_name, const char *new_name,
                                 char *errstr, size_t errstr_sz);
 
@@ -286,7 +279,7 @@ Fil_path MySQL_undo_path;
 /** The undo path is different from any other known directory. */
 bool MySQL_undo_path_is_unique;
 
-/** Common InnoDB file extentions */
+/** Common InnoDB file extensions */
 const char *dot_ext[] = {"",     ".ibd", ".cfg",   ".cfp",
                          ".ibt", ".ibu", ".dblwr", ".bdblwr"};
 
@@ -1915,19 +1908,12 @@ because of the race condition below. */
 void Fil_shard::validate() const {
   mutex_acquire();
 
-  size_t n_open = 0;
-
   for (auto elem : m_spaces) {
     page_no_t size = 0;
     auto space = elem.second;
 
     for (const auto &file : space->files) {
       ut_a(file.is_open || !file.n_pending_ios);
-
-      if (file.is_open) {
-        ++n_open;
-      }
-
       size += file.size;
     }
 
@@ -3290,7 +3276,7 @@ fil_space_t *Fil_shard::space_create(const char *name, space_id_t space_id,
   space->m_encryption_metadata.m_type = Encryption::NONE;
   space->encryption_op_in_progress = Encryption::Progress::NONE;
 
-  rw_lock_create(fil_space_latch_key, &space->latch, SYNC_FSP);
+  rw_lock_create(fil_space_latch_key, &space->latch, LATCH_ID_FIL_SPACE);
 
 #ifndef UNIV_HOTBACKUP
   if (space->purpose == FIL_TYPE_TEMPORARY) {
@@ -4562,6 +4548,8 @@ dberr_t Fil_shard::space_delete(space_id_t space_id, buf_remove_t buf_remove) {
     tablespace file, the record must have already been
     written to the redo log. */
     log_write_up_to(*log_sys, mtr.commit_lsn(), true);
+
+    DBUG_EXECUTE_IF("space_delete_crash", DBUG_SUICIDE(););
 #endif /* UNIV_HOTBACKUP */
 
     char *cfg_name = Fil_path::make_cfg(path);
@@ -4894,7 +4882,7 @@ static void fil_op_write_space_extend(space_id_t space_id, os_offset_t offset,
 
 /** Allocate and build a file name from a path, a table or tablespace name
 and a suffix.
-@param[in]      path_in         nullptr or the direcory path or the full path
+@param[in]      path_in         nullptr or the directory path or the full path
                                 and filename
 @param[in]      name_in         nullptr if path is full, or Table/Tablespace
                                 name
@@ -7126,7 +7114,7 @@ and return the absolute file path corresponds to backup dir
 as well as in the form of database/tablespace
 @param[in]      name            path emitted by the redo log
 @param[in]      flags           flags emitted by the redo log
-@param[in]      space_id        space_id emmited by the redo log
+@param[in]      space_id        space_id emitted by the redo log
 @param[out]     absolute_path   absolute path of tablespace
 corresponds to target dir
 @param[out]     tablespace_name name in the form of database/table */
@@ -7981,7 +7969,7 @@ dberr_t fil_io(const IORequest &type, bool sync, const page_id_t &page_id,
   auto const err = shard->do_io(type, sync, page_id, page_size, byte_offset,
                                 len, buf, message);
 #ifdef UNIV_DEBUG
-  /* If the error prevented async io, then we haven't actually transfered the
+  /* If the error prevented async io, then we haven't actually transferred the
   io responsibility at all, so we revert the debug io responsibility info. */
   auto bpage = static_cast<buf_page_t *>(message);
 
@@ -9103,7 +9091,6 @@ void Fil_system::encryption_reencrypt(
   }
 
   size_t fail_count = 0;
-  size_t rotate_count = 0;
   byte encrypt_info[Encryption::INFO_SIZE];
 
   /* This operation is done either post recovery or when the first time
@@ -9123,7 +9110,6 @@ void Fil_system::encryption_reencrypt(
     mtr_commit(&mtr);
 
     if (rotate_ok) {
-      ++rotate_count;
       if (fsp_is_ibd_tablespace(space_id)) {
         if (fsp_is_file_per_table(space_id, space->flags)) {
           ib::info(ER_IB_MSG_REENCRYPTED_TABLESPACE_KEY, space->name);
@@ -9853,7 +9839,12 @@ dberr_t Fil_system::open_for_recovery(space_id_t space_id) {
   dberr_t err = DB_SUCCESS;
 
   if (status == FIL_LOAD_OK) {
-    if ((FSP_FLAGS_GET_ENCRYPTION(space->flags) ||
+    /* In the case of undo tablespace, even if the encryption flag is not
+    enabled in space->flags, the encryption keys needs to be restored from
+    recv_sys->keys to the corresponding fil_space_t object. */
+    const bool is_undo = fsp_is_undo_tablespace(space_id);
+
+    if ((FSP_FLAGS_GET_ENCRYPTION(space->flags) || is_undo ||
          space->encryption_op_in_progress ==
              Encryption::Progress::ENCRYPTION) &&
         recv_sys->keys != nullptr) {
@@ -10196,7 +10187,7 @@ byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
 
   if (result.second == nullptr) {
     /* No file maps to this tablespace ID. It's possible that
-    the file was deleted later or is misisng. */
+    the file was deleted later or is missing. */
 
     return ptr;
   }
@@ -11754,7 +11745,13 @@ uint32_t fil_space_t::get_recent_version() const {
   return m_version;
 }
 bool fil_space_t::has_no_references() const {
-  ut_ad(fil_system->shard_by_id(id)->mutex_owned());
+  /* To assure the ref count can't be increased, we must either operate on
+  detached space that is ready to be removed, or have the fil shard latched. */
+#ifdef UNIV_DEBUG
+  if (!fil_system->shard_by_id(id)->mutex_owned()) {
+    ut_a(fil_space_get(id) != this);
+  }
+#endif
   return m_n_ref_count.load() == 0;
 }
 size_t fil_space_t::get_reference_count() const {

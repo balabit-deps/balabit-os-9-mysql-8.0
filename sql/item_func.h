@@ -241,6 +241,8 @@ class Item_func : public Item_result_field {
     TRUNCATE_FUNC,
     SQRT_FUNC,
     ABS_FUNC,
+    POW_FUNC,
+    SIGN_FUNC,
     FLOOR_FUNC,
     LOG_FUNC,
     LN_FUNC,
@@ -432,7 +434,11 @@ class Item_func : public Item_result_field {
   // Constructor used for Item_cond_and/or (see Item comment)
   Item_func(THD *thd, const Item_func *item);
 
+  /// Get the i'th argument of the function that this object represents.
   virtual Item *get_arg(uint i) { return args[i]; }
+
+  /// Get the i'th argument of the function that this object represents.
+  virtual const Item *get_arg(uint i) const { return args[i]; }
   virtual Item *set_arg(THD *, uint, Item *) {
     assert(0);
     return nullptr;
@@ -1293,6 +1299,7 @@ class Item_func_pow final : public Item_dec_func {
   Item_func_pow(const POS &pos, Item *a, Item *b) : Item_dec_func(pos, a, b) {}
   double val_real() override;
   const char *func_name() const override { return "pow"; }
+  enum Functype functype() const override { return POW_FUNC; }
 };
 
 class Item_func_acos final : public Item_dec_func {
@@ -1452,6 +1459,7 @@ class Item_func_sign final : public Item_int_func {
  public:
   Item_func_sign(const POS &pos, Item *a) : Item_int_func(pos, a) {}
   const char *func_name() const override { return "sign"; }
+  enum Functype functype() const override { return SIGN_FUNC; }
   longlong val_int() override;
   bool resolve_type(THD *thd) override;
 };
@@ -1517,10 +1525,7 @@ class Item_func_min_max : public Item_func_numhybrid {
   }
 
   /// Returns true if arguments to this function should be compared as dates.
-  bool compare_as_dates() const {
-    return temporal_item != nullptr &&
-           is_temporal_type_with_date(temporal_item->data_type());
-  }
+  bool compare_as_dates() const;
 
   /// Returns true if at least one of the arguments was of temporal type.
   bool has_temporal_arg() const { return temporal_item; }
@@ -1638,7 +1643,8 @@ class Item_rollup_group_item final : public Item_func {
     null_value = args[0]->is_null();
     return false;
   }
-  Item *inner_item() const { return args[0]; }
+  Item *inner_item() { return args[0]; }
+  const Item *inner_item() const { return args[0]; }
   bool rollup_null() const {
     return m_current_rollup_level <= m_min_rollup_level;
   }
@@ -2406,75 +2412,6 @@ class Item_master_pos_wait : public Item_source_pos_wait {
 };
 
 /**
-  This class is used for implementing the new wait_for_executed_gtid_set
-  function and the functions related to them. This new function is independent
-  of the slave threads.
-*/
-class Item_wait_for_executed_gtid_set final : public Item_int_func {
-  typedef Item_int_func super;
-
-  String value;
-
- public:
-  Item_wait_for_executed_gtid_set(const POS &pos, Item *a)
-      : Item_int_func(pos, a) {}
-  Item_wait_for_executed_gtid_set(const POS &pos, Item *a, Item *b)
-      : Item_int_func(pos, a, b) {}
-
-  bool itemize(Parse_context *pc, Item **res) override;
-  longlong val_int() override;
-  const char *func_name() const override {
-    return "wait_for_executed_gtid_set";
-  }
-  bool resolve_type(THD *thd) override {
-    if (param_type_is_default(thd, 0, 1)) return true;
-    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_DOUBLE)) return true;
-    set_nullable(true);
-    return false;
-  }
-};
-
-class Item_master_gtid_set_wait final : public Item_int_func {
-  typedef Item_int_func super;
-
-  String value;
-
- public:
-  Item_master_gtid_set_wait(const POS &pos, Item *a);
-  Item_master_gtid_set_wait(const POS &pos, Item *a, Item *b);
-  Item_master_gtid_set_wait(const POS &pos, Item *a, Item *b, Item *c);
-
-  bool itemize(Parse_context *pc, Item **res) override;
-  longlong val_int() override;
-  const char *func_name() const override {
-    return "wait_until_sql_thread_after_gtids";
-  }
-  bool resolve_type(THD *thd) override {
-    if (param_type_is_default(thd, 0, 1)) return true;
-    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_DOUBLE)) return true;
-    if (param_type_is_default(thd, 2, 3)) return true;
-    set_nullable(true);
-    return false;
-  }
-};
-
-class Item_func_gtid_subset final : public Item_int_func {
-  String buf1;
-  String buf2;
-
- public:
-  Item_func_gtid_subset(const POS &pos, Item *a, Item *b)
-      : Item_int_func(pos, a, b) {}
-  longlong val_int() override;
-  const char *func_name() const override { return "gtid_subset"; }
-  bool resolve_type(THD *thd) override {
-    if (param_type_is_default(thd, 0, ~0U)) return true;
-    return false;
-  }
-  bool is_bool_func() const override { return true; }
-};
-
-/**
  Internal functions used by INFORMATION_SCHEMA implementation to check
  if user have access to given database/table/column.
 */
@@ -3069,8 +3006,9 @@ class user_var_entry {
   bool mem_realloc(size_t length);
 
   /**
-    Check if m_ptr point to an external buffer previously alloced by realloc().
-    @retval true  - an external buffer is alloced.
+    Check if m_ptr points to an external buffer previously allocated by
+    realloc().
+    @retval true  - an external buffer is allocated.
     @retval false - m_ptr is null, or points to the internal buffer.
   */
   bool alloced() { return m_ptr && m_ptr != internal_buffer_ptr(); }
@@ -3488,7 +3426,7 @@ class Item_func_match final : public Item_real_func {
   bool score_from_index_scan{false};
   DTCollation cmp_collation;
   FT_INFO *ft_handler;
-  TABLE_LIST *table_ref;
+  Table_ref *table_ref;
   /**
      Master item means that if identical items are present in the
      statement, they use the same FT handler. FT handler is initialized
@@ -3743,6 +3681,24 @@ class Item_func_match final : public Item_real_func {
 
     return false;
   }
+};
+
+/**
+  A visitor that calls the specified function on every non-aggregated full-text
+  search function (Item_func_match) it encounters when it is used in a
+  PREFIX+POSTFIX walk with WalkItem(). It skips every item that is wrapped in an
+  aggregate function, and also every item wrapped in a reference, as the items
+  behind the reference are already handled elsewhere (in another query block or
+  in another element of the SELECT list).
+ */
+class NonAggregatedFullTextSearchVisitor : private Item_tree_walker {
+ public:
+  explicit NonAggregatedFullTextSearchVisitor(
+      std::function<bool(Item_func_match *)> func);
+  bool operator()(Item *item);
+
+ private:
+  std::function<bool(Item_func_match *)> m_func;
 };
 
 class Item_func_is_free_lock final : public Item_int_func {

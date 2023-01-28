@@ -207,11 +207,11 @@ override_dh_installlogrotate-arch:
 override_dh_install:
 	dh_install --fail-missing		\
 		-Xusr/share/man			\
-		-Xusr/share/mysql/mysql.server
+		-Xusr/share/mysql/mysql.server  \
+		-Xmysql.info
 	dh_apparmor -pmysql-server-8.0 --profile-name=usr.sbin.mysqld
 
 override_dh_installchangelogs:
-	dh_installchangelogs Docs/ChangeLog
 
 override_dh_systemd_enable:
 	dh_systemd_enable --name=mysql

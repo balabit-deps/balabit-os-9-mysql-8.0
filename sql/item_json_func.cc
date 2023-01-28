@@ -91,7 +91,7 @@ bool ensure_utf8mb4(const String &val, String *buf, const char **resptr,
   size_t ss = val.length();
 
   if (my_charset_same(cs, &my_charset_utf8mb4_bin) ||
-      my_charset_same(cs, &my_charset_utf8_bin) ||
+      my_charset_same(cs, &my_charset_utf8mb3_bin) ||
       !std::strcmp(cs->csname, "ascii")) {
     /*
       Character data is directly converted to JSON if the character
@@ -4396,7 +4396,9 @@ Item_func_json_value::create_json_value_default(THD *thd, Item *item) {
         my_error(ER_DATA_OUT_OF_RANGE, MYF(0), "FLOAT DEFAULT", func_name());
         return nullptr;
       }
-      default_value->real_default = value;
+      // The value is within range of FLOAT. Finally, cast it to float to get
+      // rid of any extra (double) precision that doesn't fit in a FLOAT.
+      default_value->real_default = static_cast<float>(value);
       break;
     }
     case ITEM_CAST_DOUBLE: {
@@ -5229,7 +5231,14 @@ double Item_func_json_value::extract_real_value() {
 
   bool err = false;
   double value = wr.coerce_real(func_name(), CE_IGNORE, &err);
-  if (!err) return value;
+  if (!err) {
+    if (data_type() == MYSQL_TYPE_FLOAT) {
+      // Remove any extra (double) precision.
+      return static_cast<float>(value);
+    } else {
+      return value;
+    }
+  }
 
   if (handle_json_value_conversion_error(
           m_on_error, data_type() == MYSQL_TYPE_DOUBLE ? "DOUBLE" : "FLOAT",

@@ -28,6 +28,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
  DDL build index implementation.
 Created 2020-11-01 by Sunny Bains. */
 
+#include <debug_sync.h>
 #include "clone0api.h"
 #include "ddl0fts.h"
 #include "ddl0impl-builder.h"
@@ -992,7 +993,7 @@ dberr_t Builder::copy_columns(Copy_ctx &ctx, size_t &mv_rows_added,
       const auto mbminlen = DATA_MBMINLEN(col->mbminmaxlen);
       const auto mbmaxlen = DATA_MBMAXLEN(col->mbminmaxlen);
 
-      /* len should be between size calcualted base on mbmaxlen and mbminlen
+      /* len should be between size calculated base on mbmaxlen and mbminlen
        */
       ut_a(len <= fixed_len);
       ut_a(!mbmaxlen || len >= mbminlen * (fixed_len / mbmaxlen));
@@ -1218,6 +1219,9 @@ dberr_t Builder::insert_direct(Cursor &cursor, size_t thread_id) noexcept {
 
     if (err != DB_SUCCESS) {
       set_error(err);
+      err = m_btr_load->finish(err);
+      ut::delete_(m_btr_load);
+      m_btr_load = nullptr;
       return get_error();
     }
   }
@@ -1917,11 +1921,11 @@ dberr_t Builder::finalize() noexcept {
   if (err == DB_SUCCESS) {
     write_redo(m_index);
 
-    DEBUG_SYNC_C_IF_THD(m_ctx.thd(), "row_log_apply_before");
+    DEBUG_SYNC(m_ctx.thd(), "row_log_apply_before");
 
     err = row_log_apply(m_ctx.m_trx, m_index, m_ctx.m_table, m_local_stage);
 
-    DEBUG_SYNC_C_IF_THD(m_ctx.thd(), "row_log_apply_after");
+    DEBUG_SYNC(m_ctx.thd(), "row_log_apply_after");
   }
 
   if (err != DB_SUCCESS) {
@@ -1972,7 +1976,7 @@ dberr_t Builder::setup_sort() noexcept {
   ut_a(!is_skip_file_sort());
   ut_a(get_state() == State::SETUP_SORT);
 
-  DEBUG_SYNC_C_IF_THD(m_ctx.thd(), "ddl_merge_sort_interrupt");
+  DEBUG_SYNC(m_ctx.thd(), "ddl_merge_sort_interrupt");
 
   const auto err = create_merge_sort_tasks();
 

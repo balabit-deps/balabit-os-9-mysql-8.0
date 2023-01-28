@@ -168,15 +168,15 @@ static_assert(classic_protocol::Codec<
 static_assert(classic_protocol::Codec<
                   classic_protocol::message::client::StmtReset>::cmd_byte() ==
               0x1a);
-static_assert(
-    classic_protocol::Codec<
-        classic_protocol::message::client::StmtSetOption>::cmd_byte() == 0x1b);
+static_assert(classic_protocol::Codec<
+                  classic_protocol::message::client::SetOption>::cmd_byte() ==
+              0x1b);
 
 static_assert(classic_protocol::Codec<
                   classic_protocol::message::client::StmtFetch>::cmd_byte() ==
               0x1c);
 
-// 0x1d - Deamon
+// 0x1d - Daemon
 // 0x1e - BinlogDumpGtid
 
 static_assert(

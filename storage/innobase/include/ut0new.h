@@ -446,7 +446,7 @@ static constexpr size_t n_auto = UT_ARR_SIZE(auto_event_names);
 extern PSI_memory_key auto_event_keys[n_auto];
 extern PSI_memory_info pfs_info_auto[n_auto];
 
-/** gcc 5 fails to evalutate costexprs at compile time. */
+/** gcc 5 fails to evaluate costexprs at compile time. */
 #if defined(__GNUG__) && (__GNUG__ == 5)
 
 /** Compute whether a string begins with a given prefix, compile-time.
@@ -726,7 +726,7 @@ inline void free(void *ptr) noexcept {
     @param[in] args Arguments one wishes to pass over to T constructor(s)
     @return Pointer to the allocated storage. Throws std::bad_alloc exception
     if dynamic storage allocation could not be fulfilled. Re-throws whatever
-    exception that may have occured during the construction of T, in which case
+    exception that may have occurred during the construction of T, in which case
     it automatically cleans up the raw memory allocated for it.
 
     Example 1:
@@ -769,7 +769,7 @@ inline T *new_withkey(PSI_memory_key_t key, Args &&... args) {
     @param[in] args Arguments one wishes to pass over to T constructor(s)
     @return Pointer to the allocated storage. Throws std::bad_alloc exception
     if dynamic storage allocation could not be fulfilled. Re-throws whatever
-    exception that may have occured during the construction of T, in which case
+    exception that may have occurred during the construction of T, in which case
     it automatically cleans up the raw memory allocated for it.
 
     Example 1:
@@ -825,7 +825,7 @@ inline void delete_(T *ptr) noexcept {
     constructor(s).
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -910,7 +910,7 @@ inline T *new_arr_withkey(PSI_memory_key_t key, Args &&... args) {
     constructor(s).
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -984,7 +984,7 @@ struct Count {
 
 /** Dynamically allocates storage for an array of T's. Constructs objects of
     type T using default constructor. If T cannot be default-initialized (e.g.
-    default constructor does not exist), then this interace cannot be used for
+    default constructor does not exist), then this interface cannot be used for
     constructing such an array. ut::new_arr_withkey overload with user-provided
     initialization must be used then. Instruments the memory with given PSI
     memory key in case PFS memory support is enabled.
@@ -993,7 +993,7 @@ struct Count {
     @param[in] count Number of T elements in an array.
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -1047,7 +1047,7 @@ inline T *new_arr_withkey(PSI_memory_key_t key, Count count) {
 
 /** Dynamically allocates storage for an array of T's. Constructs objects of
     type T using default constructor. If T cannot be default-initialized (e.g.
-    default constructor does not exist), then this interace cannot be used for
+    default constructor does not exist), then this interface cannot be used for
     constructing such an array. ut::new_arr overload with user-provided
     initialization must be used then.
 
@@ -1059,7 +1059,7 @@ inline T *new_arr_withkey(PSI_memory_key_t key, Count count) {
     @param[in] count Number of T elements in an array.
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -1656,7 +1656,7 @@ inline void aligned_delete(T *ptr) noexcept {
     shall be wrapped into a std::tuple. See examples down below. Instruments the
     memory with given PSI memory key in case PFS memory support is enabled.
 
-    To create an array of default-intialized T's, one can use this function
+    To create an array of default-initialized T's, one can use this function
     template but for convenience purposes one can achieve the same by using
     the ut::aligned_new_arr_withkey with ut::Count overload.
 
@@ -1666,7 +1666,7 @@ inline void aligned_delete(T *ptr) noexcept {
     constructor(s).
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -1735,7 +1735,7 @@ inline T *aligned_new_arr_withkey(PSI_memory_key_t key, std::size_t alignment,
 /** Dynamically allocates storage for an array of T's at address aligned to the
     requested alignment. Constructs objects of type T using default constructor.
     If T cannot be default-initialized (e.g. default constructor does not
-    exist), then this interace cannot be used for constructing such an array.
+    exist), then this interface cannot be used for constructing such an array.
     ut::new_arr_withkey overload with user-provided initialization must be used
     then. Instruments the memory with given PSI memory key in case PFS memory
     support is enabled.
@@ -1745,7 +1745,7 @@ inline T *aligned_new_arr_withkey(PSI_memory_key_t key, std::size_t alignment,
     @param[in] count Number of T elements in an array.
     @return Pointer to the first element of allocated storage. Throws
     std::bad_alloc exception if dynamic storage allocation could not be
-    fulfilled. Re-throws whatever exception that may have occured during the
+    fulfilled. Re-throws whatever exception that may have occurred during the
     construction of any instance of T, in which case it automatically destroys
     successfully constructed objects till that moment (if any), and finally
     cleans up the raw memory allocated for T instances.
@@ -2382,7 +2382,7 @@ make_unique(size_t size) {
 /** Dynamically allocates storage for an object of type T. Constructs the object
     of type T with provided Args. Wraps the pointer to an array of T instances
     into the std::unique_ptr with custom deleter which knows how to handle
-    PFS-enabled dyanmic memory allocations. Instruments the memory with given
+    PFS-enabled dynamic memory allocations. Instruments the memory with given
     PSI memory key in case PFS memory support is enabled.
 
     This overload participates in overload resolution only if T
@@ -2551,6 +2551,23 @@ std::enable_if_t<detail::is_bounded_array_v<T>> make_unique_aligned(
 template <typename T, typename... Args>
 std::enable_if_t<detail::is_bounded_array_v<T>> make_unique_aligned(
     PSI_memory_key_t key, Args &&...) = delete;
+
+/** The following is a common type that is returned by all the
+    ut::make_unique_aligned (non-aligned) specializations listed above. This is
+    effectively a if-ladder for the following list of conditions on the input
+    type: !std::is_array<T>::value -> std::unique_ptr<T,
+   detail::Aligned_deleter<T>> detail::is_unbounded_array_v<T> ->
+      std::unique_ptr<T,detail::Aligned_array_deleter<std::remove_extent_t<T>>>
+   else (or else if detail::is_bounded_array_v<T>) -> void (we do not support
+   bounded array ut::make_unique)
+ */
+template <typename T>
+using unique_ptr_aligned = std::conditional_t<
+    !std::is_array<T>::value, std::unique_ptr<T, detail::Aligned_deleter<T>>,
+    std::conditional_t<detail::is_unbounded_array_v<T>,
+                       std::unique_ptr<T, detail::Aligned_array_deleter<
+                                              std::remove_extent_t<T>>>,
+                       void>>;
 
 /** Dynamically allocates storage for an object of type T. Constructs the object
     of type T with provided Args. Wraps the pointer to T instance into the

@@ -1,0 +1,156 @@
+From b7043051bd52b1ea1070f49c3d43be354ded9f2b Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:22:29 -0500
+Subject: [PATCH 86/86] Revert "Bug#34548367 Invalid error reaches client where
+ max connections reached on Windows."
+
+This reverts commit c9f48c805d58571c21b69f31e8bba281f0ef608b.
+---
+ router/src/routing/src/mysql_routing.cc | 48 +++++++++++--------------
+ 1 file changed, 20 insertions(+), 28 deletions(-)
+
+diff --git a/router/src/routing/src/mysql_routing.cc b/router/src/routing/src/mysql_routing.cc
+index bee396352a2..42a1bf8a09f 100644
+--- a/router/src/routing/src/mysql_routing.cc
++++ b/router/src/routing/src/mysql_routing.cc
+@@ -276,15 +276,6 @@ class Acceptor {
+     }
+   }
+ 
+-  template <typename S>
+-  void graceful_shutdown(S &sock) {
+-    sock->shutdown(net::socket_base::shutdown_send);
+-    // we want to capture the socket shared_ptr by value to make sure it lives
+-    // when the async handler gets executed
+-    sock->async_wait(net::socket_base::wait_read,
+-                     [=](auto /*ec*/) { sock->close(); });
+-  }
+-
+   void operator()(std::error_code ec) {
+     waitable_([this, ec](auto &) {
+       if (ec) {
+@@ -329,15 +320,14 @@ class Acceptor {
+           }
+ 
+           // accepted
+-          auto sock =
+-              std::make_shared<socket_type>(std::move(sock_res.value()));
++          auto sock = std::move(sock_res.value());
+ 
+ #if 0 && defined(SO_INCOMING_CPU)
+         // try to run the socket-io on the CPU which also handles the kernels
+         // socket-RX queue
+         net::socket_option::integer<SOL_SOCKET, SO_INCOMING_CPU>
+             incoming_cpu_opt;
+-        const auto incoming_cpu_res = sock->get_option(incoming_cpu_opt);
++        const auto incoming_cpu_res = sock.get_option(incoming_cpu_opt);
+         if (incoming_cpu_res) {
+           auto affine_cpu = incoming_cpu_opt.value();
+           if (affine_cpu >= 0) {
+@@ -351,8 +341,8 @@ class Acceptor {
+               if (affinity.any() && affinity.test(affine_cpu)) {
+                 // replace the io-context of the socket
+                 sock =
+-                    std::make_shared<socket_type>(socket_type(io_thread.context(), 
+-                                client_endpoint.protocol(), sock->release().value()));
++                    socket_type(io_thread.context(), client_endpoint.protocol(),
++                                sock.release().value());
+                 break;
+               }
+             }
+@@ -372,7 +362,7 @@ class Acceptor {
+             if (std::is_same<client_protocol_type, net::ip::tcp>::value) {
+               log_debug("[%s] fd=%d connection accepted at %s",
+                         r_->get_context().get_name().c_str(),
+-                        sock->native_handle(),
++                        sock.native_handle(),
+                         r_->get_context().get_bind_address().str().c_str());
+ #ifdef NET_TS_HAS_UNIX_SOCKET
+             } else if (std::is_same<client_protocol_type,
+@@ -387,10 +377,10 @@ class Acceptor {
+             //
+             // if we can't get the PID, we'll just show a simpler errormsg
+ 
+-            if (0 == unix_getpeercred(*sock, peer_pid, peer_uid)) {
++            if (0 == unix_getpeercred(sock, peer_pid, peer_uid)) {
+               log_debug(
+                   "[%s] fd=%d connection accepted at %s from (pid=%d, uid=%d)",
+-                  r_->get_context().get_name().c_str(), sock->native_handle(),
++                  r_->get_context().get_name().c_str(), sock.native_handle(),
+                   r_->get_context().get_bind_named_socket().str().c_str(),
+                   peer_pid, peer_uid);
+             } else
+@@ -398,7 +388,7 @@ class Acceptor {
+ #endif
+               log_debug(
+                   "[%s] fd=%d connection accepted at %s",
+-                  r_->get_context().get_name().c_str(), sock->native_handle(),
++                  r_->get_context().get_name().c_str(), sock.native_handle(),
+                   r_->get_context().get_bind_named_socket().str().c_str());
+ #endif
+             }
+@@ -417,20 +407,20 @@ class Acceptor {
+             if (!encode_res) {
+               log_debug("[%s] fd=%d encode error: %s",
+                         r_->get_context().get_name().c_str(),
+-                        sock->native_handle(),
++                        sock.native_handle(),
+                         encode_res.error().message().c_str());
+             } else {
+-              auto write_res = net::write(*sock, net::buffer(error_frame));
++              auto write_res = net::write(sock, net::buffer(error_frame));
+               if (!write_res) {
+                 log_debug("[%s] fd=%d write error: %s",
+                           r_->get_context().get_name().c_str(),
+-                          sock->native_handle(),
++                          sock.native_handle(),
+                           write_res.error().message().c_str());
+               }
+             }
+ 
+             // log_info("%s", msg.c_str());
+-            graceful_shutdown(sock);
++            sock.close();
+           } else {
+             const auto current_total_connections =
+                 routing_component.current_total_connections();
+@@ -454,18 +444,20 @@ class Acceptor {
+               if (!encode_res) {
+                 log_debug("[%s] fd=%d encode error: %s",
+                           r_->get_context().get_name().c_str(),
+-                          sock->native_handle(),
++                          sock.native_handle(),
+                           encode_res.error().message().c_str());
+               } else {
+-                auto write_res = net::write(*sock, net::buffer(error_frame));
++                auto write_res = net::write(sock, net::buffer(error_frame));
+                 if (!write_res) {
+                   log_debug("[%s] fd=%d write error: %s",
+                             r_->get_context().get_name().c_str(),
+-                            sock->native_handle(),
++                            sock.native_handle(),
+                             write_res.error().message().c_str());
+                 }
+               }
+-              graceful_shutdown(sock);
++
++              sock.close();  // no shutdown() before close()
++
+               if (max_route_connections_limit_reached) {
+                 log_warning(
+                     "[%s] reached max active connections for route (%d max=%d)",
+@@ -480,9 +472,9 @@ class Acceptor {
+               }
+             } else {
+               if (std::is_same_v<Protocol, net::ip::tcp>) {
+-                sock->set_option(net::ip::tcp::no_delay{true});
++                sock.set_option(net::ip::tcp::no_delay{true});
+               }
+-              r_->create_connection<client_protocol_type>(std::move(*sock),
++              r_->create_connection<client_protocol_type>(std::move(sock),
+                                                           client_endpoint);
+             }
+           }
+-- 
+2.37.2
+

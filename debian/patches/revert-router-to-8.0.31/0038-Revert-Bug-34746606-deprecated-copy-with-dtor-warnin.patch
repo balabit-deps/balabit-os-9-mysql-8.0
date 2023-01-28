@@ -1,0 +1,143 @@
+From 280545097d32942cf2bcc52f597bab0ee22ac789 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:06:32 -0500
+Subject: [PATCH 38/86] Revert "Bug#34746606 deprecated-copy-with-dtor warnings
+ with clang"
+
+This reverts commit d2539683cad44dfbf8368597f52b14eff9dcbce8.
+---
+ .../include/mysql/harness/plugin_config.h        |  8 --------
+ .../include/mysqlrouter/metadata_cache.h         | 12 ------------
+ router/src/mock_server/src/statement_reader.h    | 16 ++++++----------
+ .../router/include/mysqlrouter/mysql_session.h   | 11 +----------
+ router/src/routing/src/mysql_routing_base.h      |  8 --------
+ 5 files changed, 7 insertions(+), 48 deletions(-)
+
+diff --git a/router/src/harness/include/mysql/harness/plugin_config.h b/router/src/harness/include/mysql/harness/plugin_config.h
+index 410c6494cd8..8780dca3e3d 100644
+--- a/router/src/harness/include/mysql/harness/plugin_config.h
++++ b/router/src/harness/include/mysql/harness/plugin_config.h
+@@ -60,14 +60,6 @@ class option_empty : public std::invalid_argument {
+  */
+ class HARNESS_EXPORT BasePluginConfig {
+  public:
+-  BasePluginConfig() = default;
+-
+-  BasePluginConfig(const BasePluginConfig &) = default;
+-  BasePluginConfig(BasePluginConfig &&) = default;
+-
+-  BasePluginConfig &operator=(const BasePluginConfig &) = default;
+-  BasePluginConfig &operator=(BasePluginConfig &&) = default;
+-
+   /**
+    * destructor
+    */
+diff --git a/router/src/metadata_cache/include/mysqlrouter/metadata_cache.h b/router/src/metadata_cache/include/mysqlrouter/metadata_cache.h
+index 02f1fa69521..9afef98002b 100644
+--- a/router/src/metadata_cache/include/mysqlrouter/metadata_cache.h
++++ b/router/src/metadata_cache/include/mysqlrouter/metadata_cache.h
+@@ -146,18 +146,6 @@ class METADATA_CACHE_EXPORT AcceptorUpdateHandlerInterface {
+  */
+ class METADATA_CACHE_EXPORT MetadataRefreshListenerInterface {
+  public:
+-  MetadataRefreshListenerInterface() = default;
+-
+-  MetadataRefreshListenerInterface(const MetadataRefreshListenerInterface &) =
+-      default;
+-  MetadataRefreshListenerInterface(MetadataRefreshListenerInterface &&) =
+-      default;
+-
+-  MetadataRefreshListenerInterface &operator=(
+-      const MetadataRefreshListenerInterface &) = default;
+-  MetadataRefreshListenerInterface &operator=(
+-      MetadataRefreshListenerInterface &&) = default;
+-
+   /**
+    * Callback that is going to be used on each metadata refresh.
+    *
+diff --git a/router/src/mock_server/src/statement_reader.h b/router/src/mock_server/src/statement_reader.h
+index 235b2ab3129..7934fd4b2d6 100644
+--- a/router/src/mock_server/src/statement_reader.h
++++ b/router/src/mock_server/src/statement_reader.h
+@@ -34,6 +34,7 @@
+ 
+ #include <openssl/bio.h>
+ 
++#include "my_compiler.h"
+ #include "mysql/harness/net_ts/buffer.h"
+ #include "mysql/harness/net_ts/executor.h"
+ #include "mysql/harness/net_ts/io_context.h"
+@@ -354,16 +355,6 @@ class StatementReaderBase {
+     std::optional<std::string> cert_issuer;
+   };
+ 
+-  StatementReaderBase() = default;
+-
+-  StatementReaderBase(const StatementReaderBase &) = default;
+-  StatementReaderBase(StatementReaderBase &&) = default;
+-
+-  StatementReaderBase &operator=(const StatementReaderBase &) = default;
+-  StatementReaderBase &operator=(StatementReaderBase &&) = default;
+-
+-  virtual ~StatementReaderBase() = default;
+-
+   /** @brief Returns the data about the next statement from the
+    *         json file. If there is no more statements it returns
+    *         empty statement.
+@@ -388,6 +379,11 @@ class StatementReaderBase {
+   virtual std::chrono::microseconds server_greeting_exec_time() = 0;
+ 
+   virtual void set_session_ssl_info(const SSL *ssl) = 0;
++
++  MY_COMPILER_DIAGNOSTIC_PUSH()
++  MY_COMPILER_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated")
++  virtual ~StatementReaderBase() = default;
++  MY_COMPILER_DIAGNOSTIC_POP()
+ };
+ 
+ }  // namespace server_mock
+diff --git a/router/src/router/include/mysqlrouter/mysql_session.h b/router/src/router/include/mysqlrouter/mysql_session.h
+index 56e1aa155a4..33bbf0ae8c3 100644
+--- a/router/src/router/include/mysqlrouter/mysql_session.h
++++ b/router/src/router/include/mysqlrouter/mysql_session.h
+@@ -328,17 +328,8 @@ class ROUTER_LIB_EXPORT MySQLSession {
+   };
+ 
+   struct ROUTER_LIB_EXPORT LoggingStrategy {
+-    LoggingStrategy() = default;
+-
+-    LoggingStrategy(const LoggingStrategy &) = default;
+-    LoggingStrategy(LoggingStrategy &&) = default;
+-
+-    LoggingStrategy &operator=(const LoggingStrategy &) = default;
+-    LoggingStrategy &operator=(LoggingStrategy &&) = default;
+-
+-    virtual ~LoggingStrategy() = default;
+-
+     virtual void log(const std::string &msg) = 0;
++    virtual ~LoggingStrategy() = default;
+   };
+ 
+   struct ROUTER_LIB_EXPORT LoggingStrategyNone : public LoggingStrategy {
+diff --git a/router/src/routing/src/mysql_routing_base.h b/router/src/routing/src/mysql_routing_base.h
+index 45463a9914d..8db2c53790b 100644
+--- a/router/src/routing/src/mysql_routing_base.h
++++ b/router/src/routing/src/mysql_routing_base.h
+@@ -39,14 +39,6 @@
+  */
+ class ROUTING_EXPORT MySQLRoutingBase {
+  public:
+-  MySQLRoutingBase() = default;
+-
+-  MySQLRoutingBase(const MySQLRoutingBase &) = default;
+-  MySQLRoutingBase(MySQLRoutingBase &&) = default;
+-
+-  MySQLRoutingBase &operator=(const MySQLRoutingBase &) = default;
+-  MySQLRoutingBase &operator=(MySQLRoutingBase &&) = default;
+-
+   virtual ~MySQLRoutingBase() = default;
+ 
+   virtual MySQLRoutingContext &get_context() = 0;
+-- 
+2.37.2
+

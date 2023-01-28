@@ -103,13 +103,15 @@ class METADATA_CACHE_EXPORT MetadataCache
   void stop() noexcept;
 
   /** @brief Returns list of managed servers in a cluster
-   * TODO: is this needed?!?
    *
-   * Returns list of managed servers in a cluster.
    *
    * @return std::vector containing ManagedInstance objects
    */
   metadata_cache::cluster_nodes_list_t get_cluster_nodes();
+
+  /** @brief Returns object containing current Cluster Topology
+   */
+  metadata_cache::ClusterTopology get_cluster_topology();
 
   /** Wait until cluster PRIMARY changes.
    *
@@ -236,6 +238,10 @@ class METADATA_CACHE_EXPORT MetadataCache
     trigger_acceptor_update_on_next_refresh_ = true;
   }
 
+  bool fetch_whole_topology() const { return fetch_whole_topology_; }
+
+  void fetch_whole_topology(bool val);
+
  protected:
   /** @brief Refreshes the cache
    *
@@ -250,8 +256,7 @@ class METADATA_CACHE_EXPORT MetadataCache
   // the subscribed observers
   void on_instances_changed(
       const bool md_servers_reachable,
-      const metadata_cache::cluster_nodes_list_t &cluster_nodes,
-      const metadata_cache::metadata_servers_list_t &metadata_servers,
+      const metadata_cache::ClusterTopology &cluster_topology,
       uint64_t view_id = 0);
 
   /**
@@ -266,10 +271,10 @@ class METADATA_CACHE_EXPORT MetadataCache
    *
    * @param[in] cluster_nodes_changed Information whether there was a change
    *            in instances reported by metadata refresh.
-   * @param[in] cluster_nodes Instances available after metadata refresh.
+   * @param[in] cluster_topology current cluster topology
    */
   void on_md_refresh(const bool cluster_nodes_changed,
-                     const metadata_cache::cluster_nodes_list_t &cluster_nodes);
+                     const metadata_cache::ClusterTopology &cluster_topology);
 
   // Called each time we were requested to refresh the metadata
   void on_refresh_requested();
@@ -286,7 +291,7 @@ class METADATA_CACHE_EXPORT MetadataCache
   // Update Router last_check_in timestamp in the metadata
   void update_router_last_check_in();
 
-  // Stores the current cluster topology
+  // Stores the current cluster state and topology.
   metadata_cache::ClusterTopology cluster_topology_;
 
   // identifies the Cluster we work with
@@ -379,10 +384,13 @@ class METADATA_CACHE_EXPORT MetadataCache
 
   Monitor<Stats> stats_{{}};
 
-  bool update_router_attributes_{true};
-  unsigned last_check_in_updated_{0};
+  bool initial_attributes_update_done_{false};
+  uint32_t periodic_stats_update_counter_{1};
+  std::chrono::steady_clock::time_point last_periodic_stats_update_timestamp_{
+      std::chrono::steady_clock::now()};
 
   bool ready_announced_{false};
+  std::atomic<bool> fetch_whole_topology_{false};
 
   /**
    * Flag indicating if socket acceptors state should be updated on next
@@ -391,11 +399,14 @@ class METADATA_CACHE_EXPORT MetadataCache
   std::atomic<bool> trigger_acceptor_update_on_next_refresh_{false};
 
   metadata_cache::RouterAttributes router_attributes_;
+
+  bool needs_initial_attributes_update();
+  bool needs_last_check_in_update();
 };
 
 std::string to_string(metadata_cache::ServerMode mode);
 
-/** Gets user readable information string about the nodes atributes
+/** Gets user readable information string about the nodes attributes
  * related to _hidden and _disconnect_existing_sessions_when_hidden tags.
  */
 std::string get_hidden_info(const metadata_cache::ManagedInstance &instance);

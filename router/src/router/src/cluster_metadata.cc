@@ -938,12 +938,14 @@ static std::vector<std::string> do_get_routing_mode_queries(
     const std::string &cluster_name) {
   const std::string fetch_instances_query =
       metadata_v2
-          ? "select I.mysql_server_uuid, I.endpoint, I.xendpoint, I.attributes "
+          ? "select C.cluster_id, C.cluster_name, I.mysql_server_uuid, "
+            "I.endpoint, I.xendpoint, I.attributes "
             "from mysql_innodb_cluster_metadata.v2_instances I join "
             "mysql_innodb_cluster_metadata.v2_gr_clusters C on I.cluster_id = "
             "C.cluster_id where C.cluster_name = " +
                 mysql->quote(cluster_name)
-          : "SELECT R.replicaset_name, I.mysql_server_uuid, I.role, "
+          : "SELECT F.cluster_name, R.replicaset_name, I.mysql_server_uuid, "
+            "I.role, "
             "I.addresses->>'$.mysqlClassic', "
             "I.addresses->>'$.mysqlX' "
             "FROM mysql_innodb_cluster_metadata.clusters AS F "
@@ -1036,7 +1038,8 @@ std::vector<std::string> ClusterMetadataAR::get_routing_mode_queries(
     const std::string &cluster_name) {
   return {
       // source: ClusterMetadata::fetch_instances_from_metadata_server()
-      "select I.mysql_server_uuid, I.endpoint, I.xendpoint, I.attributes from "
+      "select C.cluster_id, C.cluster_name, I.mysql_server_uuid, I.endpoint, "
+      "I.xendpoint, I.attributes from "
       "mysql_innodb_cluster_metadata.v2_instances I join "
       "mysql_innodb_cluster_metadata.v2_gr_clusters C on I.cluster_id = "
       "C.cluster_id where C.cluster_name = " +
@@ -1096,7 +1099,7 @@ static ClusterType get_cluster_type(MySQLSession *mysql) {
       "No result returned for v2_this_instance metadata query");
 }
 
-static bool is_part_of_cluster_set(MySQLSession *mysql) {
+bool is_part_of_cluster_set(MySQLSession *mysql) {
   std::string q =
       "select count(clusterset_id) from "
       "mysql_innodb_cluster_metadata.v2_this_instance i join "
@@ -1146,8 +1149,8 @@ ClusterType get_cluster_type(const MetadataSchemaVersion &schema_version,
 
     if (schema_version >= kClusterSetsMetadataVersion &&
         type == ClusterType::GR_V2) {
-      bool is_part_of_cs = is_part_of_cluster_set(mysql);
-      if (is_part_of_cs) {
+      bool part_of_cluster_set = is_part_of_cluster_set(mysql);
+      if (part_of_cluster_set) {
         // The type of the cluster that we discovered in the metadata is
         // ClusterSet. Check if the Router was actually bootstrapped for a
         // ClusterSet. If not treat it as a standalone cluster and log a
@@ -1170,11 +1173,11 @@ ClusterType get_cluster_type(const MetadataSchemaVersion &schema_version,
               "not bootstrapped to use the ClusterSet. Treating the Cluster as "
               "a standalone Cluster. Please bootstrap the Router again if you "
               "want to use ClusterSet capabilities.");
-          is_part_of_cs = false;
+          part_of_cluster_set = false;
         }
       }
 
-      return is_part_of_cs ? ClusterType::GR_CS : ClusterType::GR_V2;
+      return part_of_cluster_set ? ClusterType::GR_CS : ClusterType::GR_V2;
     }
 
     return type;

@@ -1,0 +1,176 @@
+From 26b50a1a10d932c3ade5c2075bc01b21d6ff109f Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:18:41 -0500
+Subject: [PATCH 56/86] Revert "WL#12772 connection-sharing [21/28] - flow"
+
+This reverts commit d0384a4255a06d742275a92678794de638492819.
+---
+ router/src/routing/src/CMakeLists.txt  |  1 -
+ router/src/routing/src/classic_flow.cc | 74 --------------------------
+ router/src/routing/src/classic_flow.h  | 61 ---------------------
+ 3 files changed, 136 deletions(-)
+ delete mode 100644 router/src/routing/src/classic_flow.cc
+ delete mode 100644 router/src/routing/src/classic_flow.h
+
+diff --git a/router/src/routing/src/CMakeLists.txt b/router/src/routing/src/CMakeLists.txt
+index 2c2beb50519..15401ab97c1 100644
+--- a/router/src/routing/src/CMakeLists.txt
++++ b/router/src/routing/src/CMakeLists.txt
+@@ -52,7 +52,6 @@ ADD_LIBRARY(routing SHARED
+   classic_clone.cc
+   classic_command.cc
+   classic_connect.cc
+-  classic_flow.cc
+   classic_forwarder.cc
+   classic_frame.cc
+   classic_greeting.cc
+diff --git a/router/src/routing/src/classic_flow.cc b/router/src/routing/src/classic_flow.cc
+deleted file mode 100644
+index 8aadc4dd4da..00000000000
+--- a/router/src/routing/src/classic_flow.cc
++++ /dev/null
+@@ -1,74 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_flow.h"
+-
+-#include "classic_command.h"
+-#include "classic_connection.h"
+-#include "classic_greeting.h"
+-#include "classic_query.h"
+-
+-stdx::expected<Processor::Result, std::error_code> FlowProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Greeting:
+-      return greeting();
+-    case Stage::Command:
+-      return command();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-/**
+- * the handshake part.
+- */
+-stdx::expected<Processor::Result, std::error_code> FlowProcessor::greeting() {
+-  stage(Stage::Command);
+-
+-  connection()->push_processor(std::make_unique<ClientGreetor>(connection()));
+-  return Result::Again;
+-}
+-
+-/**
+- * the command part.
+- */
+-stdx::expected<Processor::Result, std::error_code> FlowProcessor::command() {
+-  // if the greeting phase finished with auth::success, start the command
+-  // phase. Otherwise just leave.
+-  if (!connection()->authenticated()) {
+-    stage(Stage::Done);
+-    return Result::Again;
+-  }
+-
+-  connection()->connected();
+-
+-  stage(Stage::Done);
+-
+-  connection()->push_processor(
+-      std::make_unique<CommandProcessor>(connection()));
+-
+-  return Result::Again;
+-}
+diff --git a/router/src/routing/src/classic_flow.h b/router/src/routing/src/classic_flow.h
+deleted file mode 100644
+index e5505cd6f06..00000000000
+--- a/router/src/routing/src/classic_flow.h
++++ /dev/null
+@@ -1,61 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_FLOW_INCLUDED
+-#define ROUTING_CLASSIC_FLOW_INCLUDED
+-
+-#include <system_error>
+-
+-#include "processor.h"
+-
+-/**
+- * the classic protocol flow.
+- *
+- * 1. Greeting handshake
+- * 2. Commands
+- */
+-class FlowProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Greeting,
+-    Command,
+-
+-    Done,
+-  };
+-
+-  stdx::expected<Processor::Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  [[nodiscard]] Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Processor::Result, std::error_code> greeting();
+-  stdx::expected<Processor::Result, std::error_code> command();
+-
+-  Stage stage_{Stage::Greeting};
+-};
+-
+-#endif
+-- 
+2.37.2
+

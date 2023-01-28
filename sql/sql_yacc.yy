@@ -233,6 +233,16 @@ int yylex(void *yylval, void *yythd);
       MYSQL_YYABORT;                                                    \
   } while(0)
 
+#define CONTEXTUALIZE_VIEW(x)                           \
+  do                                                    \
+  {                                                     \
+    std::remove_reference<decltype(*x)>::type::context_t pc(YYTHD, Select); \
+    if (YYTHD->is_error() ||                                            \
+        (YYTHD->lex->will_contextualize && (x)->contextualize(&pc)))    \
+      MYSQL_YYABORT;                                                    \
+    if (pc.finalize_query_expression())                                 \
+      MYSQL_YYABORT;                                                    \
+  } while(0)
 
 /**
   Item::itemize() function call wrapper
@@ -789,7 +799,7 @@ void warn_about_deprecated_binary(THD *thd)
 %token<lexer.keyword> IMPORT 488
 %token<lexer.keyword> INDEXES 489
 %token  INDEX_SYM 490
-%token  INFILE 491
+%token  INFILE_SYM 491
 %token<lexer.keyword> INITIAL_SIZE_SYM 492
 %token  INNER_SYM 493                     /* SQL-2003-R */
 %token  INOUT_SYM 494                     /* SQL-2003-R */
@@ -1369,6 +1379,12 @@ void warn_about_deprecated_binary(THD *thd)
 
 %token<lexer.keyword> GTID_ONLY_SYM 1199                       /* MYSQL */
 
+%token                INTERSECT_SYM              1200 /* SQL-1992-R */
+
+%token<lexer.keyword> BULK_SYM                   1201  /* MYSQL */
+%token<lexer.keyword> URL_SYM                    1202   /* MYSQL */
+%token<lexer.keyword> GENERATE_SYM               1203   /* MYSQL */
+
 /*
   Precedence rules used to resolve the ambiguity when using keywords as idents
   in the case e.g.:
@@ -1396,6 +1412,8 @@ void warn_about_deprecated_binary(THD *thd)
 */
 %right UNIQUE_SYM KEY_SYM
 
+%left UNION_SYM EXCEPT_SYM
+%left INTERSECT_SYM
 %left CONDITIONLESS_JOIN
 %left   JOIN_SYM INNER_SYM CROSS STRAIGHT_JOIN NATURAL LEFT RIGHT ON_SYM USING
 %left   SET_VAR
@@ -1439,6 +1457,7 @@ void warn_about_deprecated_binary(THD *thd)
         schema
         engine_or_all
         opt_binlog_in
+        persisted_variable_ident
 
 %type <lex_cstr>
         key_cache_name
@@ -1474,7 +1493,6 @@ void warn_about_deprecated_binary(THD *thd)
         trg_action_time trg_event
         view_check_option
         signed_num
-        opt_num_buckets
         opt_ignore_unknown_user
 
 
@@ -1504,6 +1522,7 @@ void warn_about_deprecated_binary(THD *thd)
         profile_defs
         profile_def
         factor
+        opt_source_count
 
 %type <ulonglong_number>
         ulonglong_num real_ulonglong_num size_number
@@ -1515,7 +1534,7 @@ void warn_about_deprecated_binary(THD *thd)
 %type <locked_row_action> locked_row_action opt_locked_row_action
 
 %type <item>
-        literal insert_ident temporal_literal
+        literal insert_column temporal_literal
         simple_ident expr opt_expr opt_else
         set_function_specification sum_expr
         in_sum_expr grouping_operation
@@ -1565,7 +1584,8 @@ void warn_about_deprecated_binary(THD *thd)
 
 %type <item_list2>
         expr_list udf_expr_list opt_udf_expr_list opt_expr_list select_item_list
-        opt_paren_expr_list ident_list_arg ident_list values opt_values row_value fields
+        opt_paren_expr_list ident_list_arg ident_list values opt_values row_value
+        insert_columns
         fields_or_vars
         opt_field_or_var_spec
         row_value_explicit
@@ -1661,6 +1681,7 @@ void warn_about_deprecated_binary(THD *thd)
 %type <index_hint> index_hint_type
 %type <num> index_hint_clause
 %type <filetype> data_or_xml
+%type <source_type> load_source_type
 
 %type <da_condition_item_name> signal_condition_information_item_name
 
@@ -1695,6 +1716,8 @@ void warn_about_deprecated_binary(THD *thd)
         constraint_enforcement
         opt_not
         opt_interval
+        opt_source_order
+        opt_load_algorithm
 
 %type <show_cmd_type> opt_show_cmd_type
 
@@ -1780,8 +1803,6 @@ void warn_about_deprecated_binary(THD *thd)
 %type <table_reference> table_reference esc_table_reference
         table_factor single_table single_table_parens table_function
 
-%type <query_expression_body> query_expression_body
-
 %type <bipartite_name> lvalue_variable rvalue_system_variable
 
 %type <option_value_following_option_type> option_value_following_option_type
@@ -1814,10 +1835,14 @@ void warn_about_deprecated_binary(THD *thd)
 
 %type <select_var_list> select_var_list
 
-%type <query_primary>
+%type <query_expression_body_opt_parens> query_expression_body
+
+%type <query_expression_body>
         as_create_query_expression
-        query_expression_or_parens
         query_expression_parens
+        query_expression_with_opt_locking_clauses
+
+%type <query_primary>
         query_primary
         query_specification
 
@@ -2080,6 +2105,7 @@ void warn_about_deprecated_binary(THD *thd)
 %type <jt_column_type> jt_column_type
 
 %type <acl_type> opt_acl_type
+%type <histogram_param> opt_histogram_update_param
 %type <histogram> opt_histogram
 
 %type <lex_cstring_list> column_list opt_column_list
@@ -2138,8 +2164,8 @@ void warn_about_deprecated_binary(THD *thd)
         ts_option_encryption
         ts_option_engine_attribute
 
-%type <explain_format_type> opt_explain_format_type
-%type <explain_format_type> opt_explain_analyze_type
+%type <explain_options_type> opt_explain_format
+%type <explain_options_type> opt_explain_options
 
 %type <load_set_element> load_data_set_elem
 
@@ -3246,6 +3272,10 @@ table_primary_key_check_def:
         | OFF_SYM
           {
             Lex->mi.require_table_primary_key_check= LEX_MASTER_INFO::LEX_MI_PK_CHECK_OFF;
+          }
+        | GENERATE_SYM
+          {
+            Lex->mi.require_table_primary_key_check= LEX_MASTER_INFO::LEX_MI_PK_CHECK_GENERATE;
           }
         ;
 
@@ -6182,8 +6212,8 @@ size_number:
   | as_create_query_expression
 
   as_create_query_expression ::=
-    AS query_expression_or_parens
-  | query_expression_or_parens
+    AS query_expression_with_opt_locking_clauses
+  | query_expression_with_opt_locking_clauses
 
 */
 
@@ -6232,8 +6262,8 @@ opt_duplicate_as_qe:
         ;
 
 as_create_query_expression:
-          AS query_expression_or_parens { $$ = $2; }
-        | query_expression_or_parens    { $$ = $1; }
+          AS query_expression_with_opt_locking_clauses { $$ = $2; }
+        | query_expression_with_opt_locking_clauses    { $$ = $1; }
         ;
 
 /*
@@ -9514,14 +9544,24 @@ analyze_table_stmt:
           ANALYZE_SYM opt_no_write_to_binlog table_or_tables table_list
           opt_histogram
           {
-            $$= NEW_PTN PT_analyze_table_stmt(YYMEM_ROOT, $2, $4,
-                                              $5.command, $5.num_buckets,
-                                              $5.columns);
+            if ($5.param) {
+              $$= NEW_PTN PT_analyze_table_stmt(YYMEM_ROOT, $2, $4,
+                                                $5.command, $5.param->num_buckets,
+                                                $5.columns, $5.param->data);
+            } else {
+              $$= NEW_PTN PT_analyze_table_stmt(YYMEM_ROOT, $2, $4,
+                                                $5.command, 0,
+                                                $5.columns, {nullptr, 0});
+            }
           }
         ;
 
-opt_num_buckets:
-          /* empty */ { $$= DEFAULT_NUMBER_OF_HISTOGRAM_BUCKETS; }
+opt_histogram_update_param:
+          /* empty */
+          {
+            $$.num_buckets= DEFAULT_NUMBER_OF_HISTOGRAM_BUCKETS;
+            $$.data= { nullptr, 0 };
+          }
         | WITH NUM BUCKETS_SYM
           {
             int error;
@@ -9535,7 +9575,13 @@ opt_num_buckets:
               MYSQL_YYABORT;
             }
 
-            $$= num;
+            $$.num_buckets= num;
+            $$.data= { nullptr, 0 };
+          }
+        | USING DATA_SYM TEXT_STRING_literal
+          {
+            $$.num_buckets= 0;
+            $$.data= $3;
           }
         ;
 
@@ -9544,21 +9590,23 @@ opt_histogram:
           {
             $$.command= Sql_cmd_analyze_table::Histogram_command::NONE;
             $$.columns= nullptr;
-            $$.num_buckets= 0;
+            $$.param= nullptr;
           }
-        | UPDATE_SYM HISTOGRAM_SYM ON_SYM ident_string_list opt_num_buckets
+        | UPDATE_SYM HISTOGRAM_SYM ON_SYM ident_string_list opt_histogram_update_param
           {
             $$.command=
               Sql_cmd_analyze_table::Histogram_command::UPDATE_HISTOGRAM;
             $$.columns= $4;
-            $$.num_buckets= $5;
+            $$.param= NEW_PTN YYSTYPE::Histogram_param($5);
+            if ($$.param == nullptr)
+              MYSQL_YYABORT; // OOM
           }
         | DROP HISTOGRAM_SYM ON_SYM ident_string_list
           {
             $$.command=
               Sql_cmd_analyze_table::Histogram_command::DROP_HISTOGRAM;
             $$.columns= $4;
-            $$.num_buckets= 0;
+            $$.param = nullptr;
           }
         ;
 
@@ -9771,10 +9819,6 @@ select_stmt:
             $$ = NEW_PTN PT_select_stmt(NEW_PTN PT_locking($1, $2),
                                         nullptr, true);
           }
-        | query_expression_parens
-          {
-            $$ = NEW_PTN PT_select_stmt($1);
-          }
         | select_stmt_with_into
         ;
 
@@ -9827,10 +9871,6 @@ select_stmt_with_into:
           {
             $$ = NEW_PTN PT_select_stmt(NEW_PTN PT_locking($1, $2), $3);
           }
-        | query_expression_parens into_clause
-          {
-            $$ = NEW_PTN PT_select_stmt($1, $2);
-          }
         ;
 
 /**
@@ -9870,77 +9910,46 @@ query_expression:
           opt_order_clause
           opt_limit_clause
           {
-            $$ = NEW_PTN PT_query_expression($1, $2, $3);
+            $$ = NEW_PTN PT_query_expression($1.body, $2, $3);
           }
         | with_clause
           query_expression_body
           opt_order_clause
           opt_limit_clause
           {
-            $$= NEW_PTN PT_query_expression($1, $2, $3, $4);
-          }
-        | query_expression_parens
-          order_clause
-          opt_limit_clause
-          {
-            $$= NEW_PTN PT_query_expression($1, $2, $3);
-          }
-        | with_clause
-          query_expression_parens
-          order_clause
-          opt_limit_clause
-          {
-            $$= NEW_PTN PT_query_expression($1, $2, $3, $4);
-          }
-        | query_expression_parens
-          limit_clause
-          {
-            $$ = NEW_PTN PT_query_expression($1, nullptr, $2);
-          }
-        | with_clause
-          query_expression_parens
-          limit_clause
-          {
-            $$ = NEW_PTN PT_query_expression($1, $2, nullptr, $3);
-          }
-        | with_clause
-          query_expression_parens
-          {
-            $$ = NEW_PTN PT_query_expression($1, $2, nullptr, nullptr);
+            $$= NEW_PTN PT_query_expression($1, $2.body, $3, $4);
           }
         ;
 
 query_expression_body:
           query_primary
           {
-            $$ = $1;
+            $$ = {$1, false};
           }
-        | query_expression_body UNION_SYM union_option query_primary
+        | query_expression_parens %prec SUBQUERY_AS_EXPR
           {
-            $$ = NEW_PTN PT_union($1, @1, $3, $4);
+            $$ = {$1, true};
           }
-        | query_expression_parens UNION_SYM union_option query_primary
+        | query_expression_body UNION_SYM union_option query_expression_body
           {
-            $$ = NEW_PTN PT_union($1, @1, $3, $4);
+            $$ = {NEW_PTN PT_union($1.body, $3, $4.body, $4.is_parenthesized),
+                  false};
           }
-        | query_expression_body UNION_SYM union_option query_expression_parens
+        | query_expression_body EXCEPT_SYM union_option query_expression_body
           {
-            $$ = NEW_PTN PT_union($1, @1, $3, $4, true);
+            $$ = {NEW_PTN PT_except($1.body, $3, $4.body, $4.is_parenthesized),
+                  false};
           }
-        | query_expression_parens UNION_SYM union_option query_expression_parens
+        | query_expression_body INTERSECT_SYM union_option query_expression_body
           {
-            $$ = NEW_PTN PT_union($1, @1, $3, $4, true);
+            $$ = {NEW_PTN PT_intersect($1.body, $3, $4.body, $4.is_parenthesized),
+                  false};
           }
         ;
 
-
 query_expression_parens:
-          '(' query_expression_parens ')' { $$= $2; }
-        | '(' query_expression')' { $$= $2; }
-        | '(' query_expression locking_clause_list')'
-          {
-            $$ = NEW_PTN PT_locking($2, $3);
-          }
+          '(' query_expression_parens ')'                       { $$ = $2; }
+        | '(' query_expression_with_opt_locking_clauses')'      { $$ = $2; }
         ;
 
 query_primary:
@@ -13222,7 +13231,7 @@ insert_from_constructor:
             $$.column_list= NEW_PTN PT_item_list;
             $$.row_value_list= $3;
           }
-        | '(' fields ')' insert_values
+        | '(' insert_columns ')' insert_values
           {
             $$.column_list= $2;
             $$.row_value_list= $4;
@@ -13230,31 +13239,31 @@ insert_from_constructor:
         ;
 
 insert_query_expression:
-          query_expression_or_parens
+          query_expression_with_opt_locking_clauses
           {
             $$.column_list= NEW_PTN PT_item_list;
             $$.insert_query_expression= $1;
           }
-        | '(' ')' query_expression_or_parens
+        | '(' ')' query_expression_with_opt_locking_clauses
           {
             $$.column_list= NEW_PTN PT_item_list;
             $$.insert_query_expression= $3;
           }
-        | '(' fields ')' query_expression_or_parens
+        | '(' insert_columns ')' query_expression_with_opt_locking_clauses
           {
             $$.column_list= $2;
             $$.insert_query_expression= $4;
           }
         ;
 
-fields:
-          fields ',' insert_ident
+insert_columns:
+          insert_columns ',' insert_column
           {
             if ($$->push_back($3))
               MYSQL_YYABORT;
             $$= $1;
           }
-        | insert_ident
+        | insert_column
           {
             $$= NEW_PTN PT_item_list;
             if ($$ == NULL || $$->push_back($1))
@@ -13269,13 +13278,12 @@ insert_values:
           }
         ;
 
-query_expression_or_parens:
+query_expression_with_opt_locking_clauses:
           query_expression                      { $$ = $1; }
         | query_expression locking_clause_list
           {
             $$ = NEW_PTN PT_locking($1, $2);
           }
-        | query_expression_parens               { $$ = $1; }
         ;
 
 value_or_values:
@@ -13967,9 +13975,10 @@ describe_stmt:
         ;
 
 explain_stmt:
-          describe_command opt_explain_analyze_type explainable_stmt
+          describe_command opt_explain_options explainable_stmt
           {
-            $$= NEW_PTN PT_explain($2, $3);
+            $$= NEW_PTN PT_explain($2.explain_format_type, $2.is_analyze,
+                                   $2.is_explicit, $3);
           }
         ;
 
@@ -13990,51 +13999,41 @@ describe_command:
         | DESCRIBE
         ;
 
-opt_explain_format_type:
+opt_explain_format:
           /* empty */
           {
-            $$= Explain_format_type::DEFAULT;
+            $$.is_explicit = false;
+            $$.explain_format_type = YYTHD->variables.explain_format;
           }
         | FORMAT_SYM EQ ident_or_text
           {
+            $$.is_explicit = true;
             if (is_identifier($3, "JSON"))
-              $$= Explain_format_type::JSON;
+              $$.explain_format_type = Explain_format_type::JSON;
             else if (is_identifier($3, "TRADITIONAL"))
-              $$= Explain_format_type::TRADITIONAL;
+              $$.explain_format_type = Explain_format_type::TRADITIONAL;
             else if (is_identifier($3, "TREE"))
-              $$= Explain_format_type::TREE;
-            else
-            {
+              $$.explain_format_type = Explain_format_type::TREE;
+            else {
+              // This includes even TRADITIONAL_STRICT. Since this value is
+              // only meant for mtr infrastructure temporarily, we don't want
+              // the user to explicitly use this value in EXPLAIN statements.
+              // This results in having one less place to deprecate from.
               my_error(ER_UNKNOWN_EXPLAIN_FORMAT, MYF(0), $3.str);
               MYSQL_YYABORT;
             }
           }
 
-opt_explain_analyze_type:
-          ANALYZE_SYM opt_explain_format_type
+opt_explain_options:
+          ANALYZE_SYM opt_explain_format
           {
-            switch ($2)
-            {
-              case Explain_format_type::DEFAULT:
-              case Explain_format_type::TREE:
-                $$= Explain_format_type::TREE_WITH_EXECUTE;
-                break;
-              case Explain_format_type::JSON:
-                my_error(ER_NOT_SUPPORTED_YET, MYF(0),
-                         "FORMAT=JSON with EXPLAIN ANALYZE");
-                MYSQL_YYABORT;
-              default:
-                my_error(ER_NOT_SUPPORTED_YET, MYF(0),
-                         "FORMAT=TRADITIONAL with EXPLAIN ANALYZE");
-                MYSQL_YYABORT;
-            }
+            $$ = $2;
+            $$.is_analyze = true;
           }
-        | opt_explain_format_type
+        | opt_explain_format
           {
-            if ($1 == Explain_format_type::DEFAULT)
-              $$= Explain_format_type::TRADITIONAL;
-            else
-              $$= $1;
+            $$ = $1;
+            $$.is_analyze = false;
           }
         ;
 
@@ -14085,7 +14084,7 @@ opt_flush_lock:
           /* empty */ {}
         | WITH READ_SYM LOCK_SYM
           {
-            TABLE_LIST *tables= Lex->query_tables;
+            Table_ref *tables= Lex->query_tables;
             Lex->type|= REFRESH_READ_LOCK;
             for (; tables; tables= tables->next_global)
             {
@@ -14105,7 +14104,7 @@ opt_flush_lock:
           }
           EXPORT_SYM
           {
-            TABLE_LIST *tables= Lex->query_tables;
+            Table_ref *tables= Lex->query_tables;
             Lex->type|= REFRESH_FOR_EXPORT;
             for (; tables; tables= tables->next_global)
             {
@@ -14188,11 +14187,33 @@ opt_if_exists_ident:
             lex->drop_if_exists= false;
             lex->name= NULL_STR;
           }
-        | if_exists ident
+        | if_exists persisted_variable_ident
           {
             LEX *lex=Lex;
             lex->drop_if_exists= $1;
             lex->name= $2;
+          }
+        ;
+
+persisted_variable_ident:
+          ident
+        | ident '.' ident
+          {
+            const LEX_STRING prefix = $1;
+            const LEX_STRING suffix = $3;
+            $$.length = prefix.length + 1 + suffix.length + 1;
+            $$.str = static_cast<char *>(YYTHD->alloc($$.length));
+            if ($$.str == nullptr) YYABORT;  // OOM
+            strxnmov($$.str, $$.length, prefix.str, ".", suffix.str, nullptr);
+          }
+        | DEFAULT_SYM '.' ident
+          {
+            const LEX_CSTRING prefix{STRING_WITH_LEN("default")};
+            const LEX_STRING suffix = $3;
+            $$.length = prefix.length + 1 + suffix.length + 1;
+            $$.str = static_cast<char *>(YYTHD->alloc($$.length));
+            if ($$.str == nullptr) YYABORT;  // OOM
+            strxnmov($$.str, $$.length, prefix.str, ".", suffix.str, nullptr);
           }
         ;
 
@@ -14322,38 +14343,46 @@ load_stmt:
           LOAD                          /*  1 */
           data_or_xml                   /*  2 */
           load_data_lock                /*  3 */
-          opt_local                     /*  4 */
-          INFILE                        /*  5 */
-          TEXT_STRING_filesystem        /*  6 */
-          opt_duplicate                 /*  7 */
-          INTO                          /*  8 */
-          TABLE_SYM                     /*  9 */
-          table_ident                   /* 10 */
-          opt_use_partition             /* 11 */
-          opt_load_data_charset         /* 12 */
-          opt_xml_rows_identified_by    /* 13 */
-          opt_field_term                /* 14 */
-          opt_line_term                 /* 15 */
-          opt_ignore_lines              /* 16 */
-          opt_field_or_var_spec         /* 17 */
-          opt_load_data_set_spec        /* 18 */
+          opt_from_keyword              /*  4 */
+          opt_local                     /*  5 */
+          load_source_type              /*  6 */
+          TEXT_STRING_filesystem        /*  7 */
+          opt_source_count              /*  8 */
+          opt_source_order              /*  9 */
+          opt_duplicate                 /* 10 */
+          INTO                          /* 11 */
+          TABLE_SYM                     /* 12 */
+          table_ident                   /* 13 */
+          opt_use_partition             /* 14 */
+          opt_load_data_charset         /* 15 */
+          opt_xml_rows_identified_by    /* 16 */
+          opt_field_term                /* 17 */
+          opt_line_term                 /* 18 */
+          opt_ignore_lines              /* 19 */
+          opt_field_or_var_spec         /* 20 */
+          opt_load_data_set_spec        /* 21 */
+          opt_load_algorithm            /* 22 */
           {
             $$= NEW_PTN PT_load_table($2,  // data_or_xml
                                       $3,  // load_data_lock
-                                      $4,  // opt_local
-                                      $6,  // TEXT_STRING_filesystem
-                                      $7,  // opt_duplicate
-                                      $10, // table_ident
-                                      $11, // opt_use_partition
-                                      $12, // opt_load_data_charset
-                                      $13, // opt_xml_rows_identified_by
-                                      $14, // opt_field_term
-                                      $15, // opt_line_term
-                                      $16, // opt_ignore_lines
-                                      $17, // opt_field_or_var_spec
-                                      $18.set_var_list,// opt_load_data_set_spec
-                                      $18.set_expr_list,
-                                      $18.set_expr_str_list);
+                                      $5,  // opt_local
+                                      $6,  // source type
+                                      $7,  // TEXT_STRING_filesystem
+                                      $8,  // opt_source_count
+                                      $9,  // opt_source_order
+                                      $10, // opt_duplicate
+                                      $13, // table_ident
+                                      $14, // opt_use_partition
+                                      $15, // opt_load_data_charset
+                                      $16, // opt_xml_rows_identified_by
+                                      $17, // opt_field_term
+                                      $18, // opt_line_term
+                                      $19, // opt_ignore_lines
+                                      $20, // opt_field_or_var_spec
+                                      $21.set_var_list,// opt_load_data_set_spec
+                                      $21.set_expr_list,
+                                      $21.set_expr_str_list,
+                                      $22); // opt_load_algorithm
           }
         ;
 
@@ -14367,10 +14396,40 @@ opt_local:
         | LOCAL_SYM   { $$= true; }
         ;
 
+opt_from_keyword:
+          /* empty */ {}
+        | FROM        {}
+        ;
+
 load_data_lock:
           /* empty */ { $$= TL_WRITE_DEFAULT; }
         | CONCURRENT  { $$= TL_WRITE_CONCURRENT_INSERT; }
         | LOW_PRIORITY { $$= TL_WRITE_LOW_PRIORITY; }
+        ;
+
+load_source_type:
+          INFILE_SYM { $$ = LOAD_SOURCE_FILE; }
+        | URL_SYM    { $$ = LOAD_SOURCE_URL; }
+     // | S3_SYM     { $$ = LOAD_SOURCE_S3; }
+        ;
+
+opt_source_count:
+          /* empty */   { $$= 0; }
+        | COUNT_SYM NUM { $$= atol($2.str); }
+        | IDENT_sys NUM
+          {
+            // COUNT can be key word or identifier based on SQL mode
+            if (my_strcasecmp(system_charset_info, $1.str, "count") != 0) {
+              YYTHD->syntax_error_at(@1, "COUNT expected");
+              YYABORT;
+            }
+            $$= atol($2.str);
+          }
+        ;
+
+opt_source_order:
+          /* empty */  { $$= false; }
+        | IN_SYM PRIMARY_SYM KEY_SYM ORDER_SYM { $$= true; }
         ;
 
 opt_duplicate:
@@ -14542,6 +14601,11 @@ load_data_set_elem:
             if ($$.set_expr_str == nullptr)
               MYSQL_YYABORT; // OOM
           }
+        ;
+
+opt_load_algorithm:
+          /* empty */               { $$ = false; }
+        | ALGORITHM_SYM EQ BULK_SYM { $$ = true; }
         ;
 
 /* Common definitions */
@@ -14728,9 +14792,8 @@ opt_interval:
 ** Creating different items.
 **********************************************************************/
 
-insert_ident:
+insert_column:
           simple_ident_nospvar
-        | table_wild
         ;
 
 table_wild:
@@ -15205,6 +15268,7 @@ ident_keywords_unambiguous:
         | BOOL_SYM
         | BTREE_SYM
         | BUCKETS_SYM
+        | BULK_SYM
         | CASCADED
         | CATALOG_NAME_SYM
         | CHAIN_SYM
@@ -15288,7 +15352,14 @@ ident_keywords_unambiguous:
         | FORMAT_SYM
         | FOUND_SYM
         | FULL
+          {
+            THD *thd= YYTHD;
+            push_warning_printf(thd, Sql_condition::SL_WARNING,
+                                ER_WARN_DEPRECATED_IDENT,
+                                ER_THD(thd, ER_WARN_DEPRECATED_IDENT), "FULL");
+          }
         | GENERAL
+        | GENERATE_SYM
         | GEOMETRYCOLLECTION_SYM
         | GEOMETRY_SYM
         | GET_FORMAT
@@ -15582,6 +15653,7 @@ ident_keywords_unambiguous:
         | UNREGISTER_SYM
         | UNTIL_SYM
         | UPGRADE_SYM
+        | URL_SYM
         | USER
         | USE_FRM
         | VALIDATION_SYM
@@ -17380,7 +17452,7 @@ view_tail:
                                                     TL_IGNORE,
                                                     MDL_EXCLUSIVE))
               MYSQL_YYABORT;
-            lex->query_tables->open_strategy= TABLE_LIST::OPEN_STUB;
+            lex->query_tables->open_strategy= Table_ref::OPEN_STUB;
             thd->parsing_system_view= lex->query_tables->is_system_view;
             if ($4.size())
             {
@@ -17409,7 +17481,7 @@ view_tail:
         ;
 
 view_query_block:
-          query_expression_or_parens view_check_option
+          query_expression_with_opt_locking_clauses view_check_option
           {
             THD *thd= YYTHD;
             LEX *lex= Lex;
@@ -17417,29 +17489,29 @@ view_query_block:
             lex->parsing_options.allows_select_into= false;
 
             /*
-              In CREATE VIEW v ... the table_list initially contains
+              In CREATE VIEW v ... the m_table_list initially contains
               here a table entry for the destination "table" `v'.
               Backup it and clean the table list for the processing of
               the query expression and push `v' back to the beginning of the
-              table_list finally.
+              m_table_list finally.
 
               @todo: Don't save the CREATE destination table in
-                     Query_block::table_list and remove this backup & restore.
+                     Query_block::m_table_list and remove this backup & restore.
 
               The following work only with the local list, the global list
               is created correctly in this case
             */
-            SQL_I_List<TABLE_LIST> save_list;
+            SQL_I_List<Table_ref> save_list;
             Query_block * const save_query_block= Select;
-            save_query_block->table_list.save_and_clear(&save_list);
+            save_query_block->m_table_list.save_and_clear(&save_list);
 
-            CONTEXTUALIZE($1);
+            CONTEXTUALIZE_VIEW($1);
 
             /*
               The following work only with the local list, the global list
               is created correctly in this case
             */
-            save_query_block->table_list.push_front(&save_list);
+            save_query_block->m_table_list.push_front(&save_list);
 
             Lex->create_view_check= $2;
 

@@ -1,0 +1,315 @@
+From c057e9450da4f347d4e0d640204db6aaa94e5c97 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:18:31 -0500
+Subject: [PATCH 54/86] Revert "WL#12772 connection-sharing [23/28] - config
+ options"
+
+This reverts commit 70e0895c494ed270d77c0015786b9393b7a59d91.
+---
+ .../src/routing/include/mysqlrouter/routing.h | 13 ------
+ .../mysqlrouter/supported_routing_options.h   |  5 +--
+ router/src/routing/src/classic_command.cc     |  5 +--
+ router/src/routing/src/context.h              | 12 +-----
+ router/src/routing/src/mysql_routing.cc       |  6 +--
+ router/src/routing/src/mysql_routing.h        |  7 +---
+ router/src/routing/src/plugin_config.cc       | 16 +-------
+ router/src/routing/src/plugin_config.h        |  6 ---
+ router/src/routing/src/routing_plugin.cc      | 41 +------------------
+ 9 files changed, 11 insertions(+), 100 deletions(-)
+
+diff --git a/router/src/routing/include/mysqlrouter/routing.h b/router/src/routing/include/mysqlrouter/routing.h
+index 2255aa3c433..49f6d6a116e 100644
+--- a/router/src/routing/include/mysqlrouter/routing.h
++++ b/router/src/routing/include/mysqlrouter/routing.h
+@@ -86,19 +86,6 @@ constexpr const unsigned int kDefaultNetBufferLength{16384};
+  */
+ constexpr const std::chrono::seconds kDefaultClientConnectTimeout{9};
+ 
+-/**
+- * delay in milliseconds before an idling connection may be moved to the pool
+- * when connection sharing is allowed.
+- */
+-constexpr const std::chrono::milliseconds kDefaultConnectionSharingDelay{1000};
+-
+-/**
+- * The number of seconds that MySQL Router waits between checking for
+- * reachability of an unreachable destination.
+- */
+-constexpr const std::chrono::seconds
+-    kDefaultUnreachableDestinationRefreshInterval{1};
+-
+ /** @brief Modes supported by Routing plugin */
+ enum class AccessMode {
+   kUndefined = 0,
+diff --git a/router/src/routing/include/mysqlrouter/supported_routing_options.h b/router/src/routing/include/mysqlrouter/supported_routing_options.h
+index f1b82a562ad..500d27db7ae 100644
+--- a/router/src/routing/include/mysqlrouter/supported_routing_options.h
++++ b/router/src/routing/include/mysqlrouter/supported_routing_options.h
+@@ -28,7 +28,7 @@
+ #include <array>
+ #include <string_view>
+ 
+-static constexpr std::array<const char *, 31> routing_supported_options{
++static constexpr std::array<const char *, 29> routing_supported_options{
+     "protocol",
+     "destinations",
+     "bind_port",
+@@ -60,8 +60,5 @@ static constexpr std::array<const char *, 31> routing_supported_options{
+     // that is no longer used, kept for backward compatibilty, replaced by
+     // [destination_status].error_quarantine_interval
+     "unreachable_destination_refresh_interval",
+-    "connection_sharing",
+-    "connection_sharing_delay",
+ };
+-
+ #endif /* MYSQLROUTER_ROUTING_SUPPORTED_ROUTING_INCLUDED */
+diff --git a/router/src/routing/src/classic_command.cc b/router/src/routing/src/classic_command.cc
+index fede59ff9bd..58e97a7fabb 100644
+--- a/router/src/routing/src/classic_command.cc
++++ b/router/src/routing/src/classic_command.cc
+@@ -178,12 +178,11 @@ stdx::expected<Processor::Result, std::error_code> CommandProcessor::command() {
+       if (server_conn.is_open() && connection()->connection_sharing_allowed()) {
+         trace(Tracer::Event().stage("client::idle::starting"));
+ 
+-        auto delay = connection()->context().connection_sharing_delay();
+-        if (!delay.count()) {
++        if (true) {
+           client_idle_timeout();
+         } else {
+           // multiplex-timeout
+-          t.expires_after(delay);
++          t.expires_after(100ms);
+           t.async_wait([this](auto ec) {
+             if (ec) return;
+ 
+diff --git a/router/src/routing/src/context.h b/router/src/routing/src/context.h
+index 81d132e39c8..94dfd642916 100644
+--- a/router/src/routing/src/context.h
++++ b/router/src/routing/src/context.h
+@@ -66,8 +66,7 @@ class MySQLRoutingContext {
+                       SslMode client_ssl_mode, TlsServerContext *client_ssl_ctx,
+                       SslMode server_ssl_mode,
+                       DestinationTlsContext *dest_tls_context,
+-                      bool connection_sharing,
+-                      std::chrono::milliseconds connection_sharing_delay)
++                      bool connection_sharing)
+       : protocol_(protocol),
+         name_(std::move(name)),
+         net_buffer_length_(net_buffer_length),
+@@ -80,8 +79,7 @@ class MySQLRoutingContext {
+         server_ssl_mode_{server_ssl_mode},
+         destination_tls_context_{dest_tls_context},
+         blocked_endpoints_{max_connect_errors},
+-        connection_sharing_{connection_sharing},
+-        connection_sharing_delay_{connection_sharing_delay} {}
++        connection_sharing_{connection_sharing} {}
+ 
+   BlockedEndpoints &blocked_endpoints() { return blocked_endpoints_; }
+   const BlockedEndpoints &blocked_endpoints() const {
+@@ -165,10 +163,6 @@ class MySQLRoutingContext {
+ 
+   bool connection_sharing() const { return connection_sharing_; }
+ 
+-  std::chrono::milliseconds connection_sharing_delay() const {
+-    return connection_sharing_delay_;
+-  }
+-
+  private:
+   /** protocol type. */
+   BaseProtocol::Type protocol_;
+@@ -218,8 +212,6 @@ class MySQLRoutingContext {
+ 
+   bool connection_sharing_;
+ 
+-  std::chrono::milliseconds connection_sharing_delay_;
+-
+  public:
+   /** @brief Number of active routes */
+   std::atomic<uint16_t> info_active_routes_{0};
+diff --git a/router/src/routing/src/mysql_routing.cc b/router/src/routing/src/mysql_routing.cc
+index 89aadf930b0..ea588c4d2bb 100644
+--- a/router/src/routing/src/mysql_routing.cc
++++ b/router/src/routing/src/mysql_routing.cc
+@@ -120,14 +120,12 @@ MySQLRouting::MySQLRouting(
+     std::chrono::milliseconds client_connect_timeout,
+     unsigned int net_buffer_length, SslMode client_ssl_mode,
+     TlsServerContext *client_ssl_ctx, SslMode server_ssl_mode,
+-    DestinationTlsContext *dest_ssl_ctx, bool connection_sharing,
+-    std::chrono::milliseconds connection_sharing_delay)
++    DestinationTlsContext *dest_ssl_ctx, bool connection_sharing)
+     : context_(protocol, route_name, net_buffer_length,
+                destination_connect_timeout, client_connect_timeout,
+                mysql_harness::TCPAddress(bind_address, port), named_socket,
+                max_connect_errors, client_ssl_mode, client_ssl_ctx,
+-               server_ssl_mode, dest_ssl_ctx, connection_sharing,
+-               connection_sharing_delay),
++               server_ssl_mode, dest_ssl_ctx, connection_sharing),
+       io_ctx_{io_ctx},
+       routing_strategy_(routing_strategy),
+       access_mode_(access_mode),
+diff --git a/router/src/routing/src/mysql_routing.h b/router/src/routing/src/mysql_routing.h
+index 395c14d1336..accbf18bfe5 100644
+--- a/router/src/routing/src/mysql_routing.h
++++ b/router/src/routing/src/mysql_routing.h
+@@ -38,7 +38,6 @@
+ 
+ #include <array>
+ #include <atomic>
+-#include <chrono>
+ #include <iostream>
+ #include <map>
+ #include <memory>
+@@ -142,8 +141,6 @@ class ROUTING_EXPORT MySQLRouting : public MySQLRoutingBase {
+    * @param dest_ssl_ctx SSL contexts of the destinations
+    * @param connection_sharing if connection sharing is allowed by the
+    * configuration
+-   * @param connection_sharing_delay default before a idling connection is moved
+-   * to the pool of connection sharing is allowed.
+    */
+   MySQLRouting(
+       net::io_context &io_ctx, routing::RoutingStrategy routing_strategy,
+@@ -163,9 +160,7 @@ class ROUTING_EXPORT MySQLRouting : public MySQLRoutingBase {
+       TlsServerContext *client_ssl_ctx = nullptr,
+       SslMode server_ssl_mode = SslMode::kDisabled,
+       DestinationTlsContext *dest_ssl_ctx = nullptr,
+-      bool connection_sharing = false,
+-      std::chrono::milliseconds connection_sharing_delay =
+-          routing::kDefaultConnectionSharingDelay);
++      bool connection_sharing = false);
+ 
+   /** @brief Starts the service and accept incoming connections
+    *
+diff --git a/router/src/routing/src/plugin_config.cc b/router/src/routing/src/plugin_config.cc
+index 1d3ea2eac5b..9e1f213eb5a 100644
+--- a/router/src/routing/src/plugin_config.cc
++++ b/router/src/routing/src/plugin_config.cc
+@@ -53,8 +53,6 @@ using namespace std::string_view_literals;
+ IMPORT_LOG_FUNCTIONS()
+ 
+ using StringOption = mysql_harness::StringOption;
+-using BoolOption = mysql_harness::BoolOption;
+-using DoubleOption = mysql_harness::DoubleOption;
+ 
+ template <class T>
+ using IntOption = mysql_harness::IntOption<T>;
+@@ -483,17 +481,6 @@ RoutingPluginConfig::RoutingPluginConfig(
+         "[destination_status].error_quarantine_interval instead.");
+   }
+ 
+-  GET_OPTION_CHECKED(connection_sharing, section, "connection_sharing",
+-                     BoolOption{});
+-
+-  static_assert(mysql_harness::str_in_collection(routing_supported_options,
+-                                                 "connection_sharing_delay"));
+-  connection_sharing_delay =
+-      std::chrono::duration_cast<std::chrono::milliseconds>(
+-          std::chrono::duration<double, std::chrono::seconds::period>(
+-              get_option(section, "connection_sharing_delay",
+-                         DoubleOption{0})));
+-
+   using namespace std::string_literals;
+ 
+   // either bind_address or socket needs to be set, or both
+@@ -559,8 +546,7 @@ std::string RoutingPluginConfig::get_default(const std::string &option) const {
+       {"client_ssl_mode", ""},
+       {"server_ssl_mode", "as_client"},
+       {"server_ssl_verify", "disabled"},
+-      {"connection_sharing", "0"},
+-      {"connection_sharing_delay", "1"},
++
+   };
+ 
+   const auto it = defaults.find(option);
+diff --git a/router/src/routing/src/plugin_config.h b/router/src/routing/src/plugin_config.h
+index 4923e8cbb16..0c88ad529ae 100644
+--- a/router/src/routing/src/plugin_config.h
++++ b/router/src/routing/src/plugin_config.h
+@@ -94,12 +94,6 @@ class ROUTING_PLUGIN_EXPORT RoutingPluginConfig
+       dest_ssl_crl_file;  //!< CRL file used to check revoked certificates
+   std::string dest_ssl_crl_dir;  //!< directory of CRL files
+   std::string dest_ssl_curves;   //!< allowed TLS curves
+-
+-  bool connection_sharing;  //!< if connection sharing is allowed.
+-  std::chrono::milliseconds
+-      connection_sharing_delay;  //!< delay before an idling connection is
+-                                 //!< moved to the pool and connection sharing
+-                                 //!< is allowed.
+ };
+ 
+ #endif  // PLUGIN_CONFIG_ROUTING_INCLUDED
+diff --git a/router/src/routing/src/routing_plugin.cc b/router/src/routing/src/routing_plugin.cc
+index 2061642de27..3a78acac878 100644
+--- a/router/src/routing/src/routing_plugin.cc
++++ b/router/src/routing/src/routing_plugin.cc
+@@ -25,6 +25,7 @@
+ #include "mysqlrouter/routing_plugin_export.h"
+ 
+ #include <atomic>
++#include <iostream>
+ #include <mutex>
+ #include <stdexcept>
+ #include <vector>
+@@ -39,8 +40,6 @@
+ #include "mysql/harness/tls_server_context.h"
+ #include "mysql/harness/utility/string.h"  // join, string_format
+ #include "mysql_routing.h"
+-#include "mysqlrouter/connection_pool.h"
+-#include "mysqlrouter/connection_pool_component.h"
+ #include "mysqlrouter/destination.h"
+ #include "mysqlrouter/io_component.h"
+ #include "mysqlrouter/routing_component.h"
+@@ -400,41 +399,6 @@ static void start(mysql_harness::PluginFuncEnv *env) {
+       dest_tls_ctx.verify(config.dest_ssl_verify);
+     }
+ 
+-    if (config.connection_sharing == 1) {
+-      if (config.source_ssl_mode == SslMode::kPassthrough) {
+-        log_warning(
+-            "[%s].connection_sharing=1 has been ignored, as "
+-            "client_ssl_mode=PASSTHROUGH.",
+-            name.c_str());
+-      } else if (config.source_ssl_mode == SslMode::kPreferred &&
+-                 config.dest_ssl_mode == SslMode::kAsClient) {
+-        log_warning(
+-            "[%s].connection_sharing=1 has been ignored, as "
+-            "client_ssl_mode=PREFERRED and server_ssl_mode=AS_CLIENT.",
+-            name.c_str());
+-      }
+-
+-      auto &pool_component = ConnectionPoolComponent::get_instance();
+-      auto default_pool_name = pool_component.default_pool_name();
+-      auto default_pool = pool_component.get(default_pool_name);
+-      if (!default_pool) {
+-        log_warning(
+-            "[%s].connection_sharing=1 has been ignored, as "
+-            "there is no [connection_pool]",
+-            name.c_str());
+-      } else if (default_pool->max_pooled_connections() == 0) {
+-        log_warning(
+-            "[%s].connection_sharing=1 has been ignored, as "
+-            "[connection_pool].max_idle_server_connections=0",
+-            name.c_str());
+-      }
+-
+-      if (config.protocol == Protocol::Type::kXProtocol) {
+-        log_warning("[%s].connection_sharing=1 has been ignored, as protocol=x",
+-                    name.c_str());
+-      }
+-    }
+-
+     net::io_context &io_ctx = IoComponent::get_instance().io_context();
+     auto r = std::make_shared<MySQLRouting>(
+         io_ctx, config.routing_strategy, config.bind_address.port(),
+@@ -446,8 +410,7 @@ static void start(mysql_harness::PluginFuncEnv *env) {
+         config.source_ssl_mode != SslMode::kDisabled ? &source_tls_ctx
+                                                      : nullptr,
+         config.dest_ssl_mode,
+-        config.dest_ssl_mode != SslMode::kDisabled ? &dest_tls_ctx : nullptr,
+-        config.connection_sharing, config.connection_sharing_delay);
++        config.dest_ssl_mode != SslMode::kDisabled ? &dest_tls_ctx : nullptr);
+ 
+     try {
+       // don't allow rootless URIs as we did already in the
+-- 
+2.37.2
+

@@ -1,0 +1,1644 @@
+From 2339eb45ace66df2120916765c62fb334b24ecf5 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:18:52 -0500
+Subject: [PATCH 58/86] Revert "WL#12772 connection-sharing [19/28] - stmt"
+
+This reverts commit 25c0dcfb186775cc49e7742e975a575e318fdaae.
+---
+ router/src/routing/src/CMakeLists.txt         |   7 -
+ router/src/routing/src/classic_set_option.cc  | 160 -----------
+ router/src/routing/src/classic_set_option.h   |  60 -----
+ router/src/routing/src/classic_stmt_close.cc  |  73 -----
+ router/src/routing/src/classic_stmt_close.h   |  50 ----
+ .../src/routing/src/classic_stmt_execute.cc   | 248 -----------------
+ router/src/routing/src/classic_stmt_execute.h |  66 -----
+ router/src/routing/src/classic_stmt_fetch.cc  | 150 -----------
+ router/src/routing/src/classic_stmt_fetch.h   |  58 ----
+ .../src/classic_stmt_param_append_data.cc     |  75 ------
+ .../src/classic_stmt_param_append_data.h      |  50 ----
+ .../src/routing/src/classic_stmt_prepare.cc   | 250 ------------------
+ router/src/routing/src/classic_stmt_prepare.h |  73 -----
+ router/src/routing/src/classic_stmt_reset.cc  | 131 ---------
+ router/src/routing/src/classic_stmt_reset.h   |  56 ----
+ 15 files changed, 1507 deletions(-)
+ delete mode 100644 router/src/routing/src/classic_set_option.cc
+ delete mode 100644 router/src/routing/src/classic_set_option.h
+ delete mode 100644 router/src/routing/src/classic_stmt_close.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_close.h
+ delete mode 100644 router/src/routing/src/classic_stmt_execute.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_execute.h
+ delete mode 100644 router/src/routing/src/classic_stmt_fetch.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_fetch.h
+ delete mode 100644 router/src/routing/src/classic_stmt_param_append_data.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_param_append_data.h
+ delete mode 100644 router/src/routing/src/classic_stmt_prepare.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_prepare.h
+ delete mode 100644 router/src/routing/src/classic_stmt_reset.cc
+ delete mode 100644 router/src/routing/src/classic_stmt_reset.h
+
+diff --git a/router/src/routing/src/CMakeLists.txt b/router/src/routing/src/CMakeLists.txt
+index d9c6cf60158..38da63456a6 100644
+--- a/router/src/routing/src/CMakeLists.txt
++++ b/router/src/routing/src/CMakeLists.txt
+@@ -64,14 +64,7 @@ ADD_LIBRARY(routing SHARED
+   classic_register_replica.cc
+   classic_reload.cc
+   classic_reset_connection.cc
+-  classic_set_option.cc
+   classic_statistics.cc
+-  classic_stmt_close.cc
+-  classic_stmt_execute.cc
+-  classic_stmt_fetch.cc
+-  classic_stmt_param_append_data.cc
+-  classic_stmt_prepare.cc
+-  classic_stmt_reset.cc
+ 
+   sql_value.cc
+ )
+diff --git a/router/src/routing/src/classic_set_option.cc b/router/src/routing/src/classic_set_option.cc
+deleted file mode 100644
+index d81df605413..00000000000
+--- a/router/src/routing/src/classic_set_option.cc
++++ /dev/null
+@@ -1,160 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_set_option.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "classic_lazy_connect.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "mysqld_error.h"  // mysql-server error-codes
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-SetOptionForwarder::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Connect:
+-      return connect();
+-    case Stage::Connected:
+-      return connected();
+-    case Stage::Response:
+-      return response();
+-    case Stage::Ok:
+-      return ok();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-SetOptionForwarder::command() {
+-  trace(Tracer::Event().stage("set_option::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    stage(Stage::Connect);
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Response);
+-
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-SetOptionForwarder::connect() {
+-  trace(Tracer::Event().stage("set_option::connect"));
+-
+-  stage(Stage::Connected);
+-
+-  connection()->push_processor(std::make_unique<LazyConnector>(
+-      connection(), false /* not in handshake */));
+-
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-SetOptionForwarder::connected() {
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    // Connector sent an server::Error already.
+-    auto *socket_splicer = connection()->socket_splicer();
+-    auto src_channel = socket_splicer->client_channel();
+-    auto src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto recv_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!recv_res) return recv_client_failed(recv_res.error());
+-
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("set_option::error"));
+-
+-    stage(Stage::Done);
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("set_option::connected"));
+-  stage(Stage::Response);
+-  return forward_client_to_server();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-SetOptionForwarder::response() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Eof = ClassicFrame::cmd_byte<classic_protocol::message::server::Eof>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Eof:
+-      stage(Stage::Ok);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("set_option::response"));
+-
+-  return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> SetOptionForwarder::ok() {
+-  trace(Tracer::Event().stage("set_option::ok"));
+-
+-  // don't pool the connection.
+-  connection()->some_state_changed(true);
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> SetOptionForwarder::error() {
+-  trace(Tracer::Event().stage("set_option::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_set_option.h b/router/src/routing/src/classic_set_option.h
+deleted file mode 100644
+index c3eeeacb096..00000000000
+--- a/router/src/routing/src/classic_set_option.h
++++ /dev/null
+@@ -1,60 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_SET_OPTION_INCLUDED
+-#define ROUTING_CLASSIC_STMT_SET_OPTION_INCLUDED
+-
+-#include "processor.h"
+-
+-class SetOptionForwarder : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Connect,
+-    Connected,
+-    Response,
+-    Ok,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> connect();
+-  stdx::expected<Result, std::error_code> connected();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> ok();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_close.cc b/router/src/routing/src/classic_stmt_close.cc
+deleted file mode 100644
+index 088720299bd..00000000000
+--- a/router/src/routing/src/classic_stmt_close.cc
++++ /dev/null
+@@ -1,73 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_close.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtCloseProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtCloseProcessor::command() {
+-  trace(Tracer::Event().stage("stmt_close::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    auto *src_channel = connection()->socket_splicer()->client_channel();
+-    auto *src_protocol = connection()->client_protocol();
+-
+-    auto frame_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!frame_res) return recv_client_failed(frame_res.error());
+-
+-    stage(Stage::Done);
+-    // discard the recv'ed message as there is ...
+-    //
+-    // - no server connection to send it to
+-    // - and therefore no prepared statement that could be closed on the server.
+-    //
+-    // StmtClose also has no way to report errors.
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Done);
+-
+-    return forward_client_to_server();
+-  }
+-}
+diff --git a/router/src/routing/src/classic_stmt_close.h b/router/src/routing/src/classic_stmt_close.h
+deleted file mode 100644
+index 569d6e4436f..00000000000
+--- a/router/src/routing/src/classic_stmt_close.h
++++ /dev/null
+@@ -1,50 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_CLOSE_INCLUDED
+-#define ROUTING_CLASSIC_STMT_CLOSE_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtCloseProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_execute.cc b/router/src/routing/src/classic_stmt_execute.cc
+deleted file mode 100644
+index a7cab04a9a2..00000000000
+--- a/router/src/routing/src/classic_stmt_execute.cc
++++ /dev/null
+@@ -1,248 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_execute.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "mysqld_error.h"  // mysql-server error-codes
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Response:
+-      return response();
+-    case Stage::ColumnCount:
+-      return column_count();
+-    case Stage::Column:
+-      return column();
+-    case Stage::EndOfColumns:
+-      return end_of_columns();
+-    case Stage::Row:
+-      return row();
+-    case Stage::EndOfRows:
+-      return end_of_rows();
+-    case Stage::Ok:
+-      return ok();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::command() {
+-  trace(Tracer::Event().stage("stmt_execute::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    auto *src_channel = connection()->socket_splicer()->client_channel();
+-    auto *src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto frame_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!frame_res) return recv_client_failed(frame_res.error());
+-
+-    // discard the recv'ed message as there is ...
+-    //
+-    // - no server connection to send it to
+-    // - and therefore no prepared statement that could be executed on the
+-    //   server.
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("stmt_execute::error"));
+-
+-    auto send_res =
+-        ClassicFrame::send_msg<classic_protocol::message::server::Error>(
+-            src_channel, src_protocol,
+-            {ER_UNKNOWN_STMT_HANDLER, "Unknown prepared statement id",
+-             "HY000"});
+-    if (!send_res) return send_client_failed(send_res.error());
+-
+-    stage(Stage::Done);
+-    return Result::SendToClient;
+-  } else {
+-    stage(Stage::Response);
+-
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::response() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Ok = ClassicFrame::cmd_byte<classic_protocol::message::server::Ok>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Ok:
+-      stage(Stage::Ok);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  stage(Stage::ColumnCount);
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::column_count() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto column_count_res =
+-      ClassicFrame::recv_msg<classic_protocol::wire::VarInt>(src_channel,
+-                                                             src_protocol);
+-  if (!column_count_res) return recv_server_failed(column_count_res.error());
+-
+-  trace(Tracer::Event().stage("stmt_execute::column_count"));
+-
+-  src_protocol->columns_left = column_count_res->value();
+-
+-  stage(Stage::Column);
+-
+-  return forward_server_to_client(true);
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::column() {
+-  trace(Tracer::Event().stage("stmt_execute::column"));
+-
+-  auto src_protocol = connection()->server_protocol();
+-
+-  if (--src_protocol->columns_left == 0) {
+-    if (src_protocol->shared_capabilities().test(
+-            classic_protocol::capabilities::pos::
+-                text_result_with_session_tracking)) {
+-      // no end-of-columns packet.
+-      stage(Stage::Row);
+-    } else {
+-      stage(Stage::EndOfColumns);
+-    }
+-  }
+-
+-  return forward_server_to_client(true);
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::end_of_columns() {
+-  trace(Tracer::Event().stage("stmt_execute::end_of_columns"));
+-
+-  stage(Stage::Row);
+-
+-  return forward_server_to_client(true);
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtExecuteProcessor::row() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Row = 0x00,
+-    Eof = ClassicFrame::cmd_byte<classic_protocol::message::server::Eof>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Eof:
+-      stage(Stage::EndOfRows);
+-      return Result::Again;
+-    case Msg::Row:
+-      trace(Tracer::Event().stage("stmt_execute::row"));
+-      return forward_server_to_client(true);
+-  }
+-
+-  return recv_server_failed(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::end_of_rows() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto msg_res = ClassicFrame::recv_msg<classic_protocol::message::server::Eof>(
+-      src_channel, src_protocol);
+-  if (!msg_res) return recv_server_failed(msg_res.error());
+-
+-  trace(Tracer::Event().stage("stmt_execute::end_of_rows"));
+-
+-  auto msg = std::move(*msg_res);
+-
+-  if (msg.status_flags().test(
+-          classic_protocol::status::pos::more_results_exist)) {
+-    stage(Stage::Response);
+-  } else {
+-    stage(Stage::Done);
+-  }
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtExecuteProcessor::ok() {
+-  trace(Tracer::Event().stage("stmt_execute::ok"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtExecuteProcessor::error() {
+-  trace(Tracer::Event().stage("stmt_execute::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_stmt_execute.h b/router/src/routing/src/classic_stmt_execute.h
+deleted file mode 100644
+index d5707b9c8e5..00000000000
+--- a/router/src/routing/src/classic_stmt_execute.h
++++ /dev/null
+@@ -1,66 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_EXECUTE_INCLUDED
+-#define ROUTING_CLASSIC_STMT_EXECUTE_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtExecuteProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Response,
+-    ColumnCount,
+-    Column,
+-    EndOfColumns,
+-    Row,
+-    EndOfRows,
+-    Ok,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> column_count();
+-  stdx::expected<Result, std::error_code> column();
+-  stdx::expected<Result, std::error_code> end_of_columns();
+-  stdx::expected<Result, std::error_code> row();
+-  stdx::expected<Result, std::error_code> end_of_rows();
+-  stdx::expected<Result, std::error_code> ok();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_fetch.cc b/router/src/routing/src/classic_stmt_fetch.cc
+deleted file mode 100644
+index 75ee9c4c31a..00000000000
+--- a/router/src/routing/src/classic_stmt_fetch.cc
++++ /dev/null
+@@ -1,150 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_fetch.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "mysqld_error.h"  // mysql-server error-codes
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtFetchProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Response:
+-      return response();
+-    case Stage::EndOfRows:
+-      return end_of_rows();
+-    case Stage::Row:
+-      return row();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtFetchProcessor::command() {
+-  trace(Tracer::Event().stage("stmt_fetch::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    auto *src_channel = connection()->socket_splicer()->client_channel();
+-    auto *src_protocol = connection()->client_protocol();
+-
+-    auto frame_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!frame_res) return recv_client_failed(frame_res.error());
+-
+-    // discard the recv'ed message as there is ...
+-    //
+-    // - no server connection to send it to
+-    // - and therefore no prepared statement that could be executed on the
+-    //   server.
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    auto send_res = ClassicFrame::send_msg(
+-        src_channel, src_protocol,
+-        classic_protocol::message::server::Error{
+-            ER_UNKNOWN_STMT_HANDLER, "Unknown prepared statement id", "HY000"},
+-        src_protocol->shared_capabilities());
+-    if (!send_res) return send_client_failed(send_res.error());
+-
+-    stage(Stage::Done);
+-    return Result::SendToClient;
+-  } else {
+-    stage(Stage::Response);
+-
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtFetchProcessor::response() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Row = 0x00,
+-    EndOfRows =
+-        ClassicFrame::cmd_byte<classic_protocol::message::server::Eof>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::EndOfRows:
+-      stage(Stage::EndOfRows);
+-      return Result::Again;
+-    case Msg::Row:
+-      stage(Stage::Row);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_fetch::response"));
+-
+-  return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtFetchProcessor::row() {
+-  trace(Tracer::Event().stage("stmt_fetch::row"));
+-
+-  stage(Stage::Response);
+-
+-  return forward_server_to_client(true);
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtFetchProcessor::end_of_rows() {
+-  trace(Tracer::Event().stage("stmt_fetch::end_of_rows"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtFetchProcessor::error() {
+-  trace(Tracer::Event().stage("stmt_fetch::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_stmt_fetch.h b/router/src/routing/src/classic_stmt_fetch.h
+deleted file mode 100644
+index c6a5a1cf621..00000000000
+--- a/router/src/routing/src/classic_stmt_fetch.h
++++ /dev/null
+@@ -1,58 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_FETCH_INCLUDED
+-#define ROUTING_CLASSIC_STMT_FETCH_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtFetchProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Response,
+-    EndOfRows,
+-    Row,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> row();
+-  stdx::expected<Result, std::error_code> end_of_rows();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_param_append_data.cc b/router/src/routing/src/classic_stmt_param_append_data.cc
+deleted file mode 100644
+index b7dbee45e0d..00000000000
+--- a/router/src/routing/src/classic_stmt_param_append_data.cc
++++ /dev/null
+@@ -1,75 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_param_append_data.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtParamAppendDataProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtParamAppendDataProcessor::command() {
+-  trace(Tracer::Event().stage("stmt_param_append_data::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    auto *src_channel = connection()->socket_splicer()->client_channel();
+-    auto *src_protocol = connection()->client_protocol();
+-
+-    auto frame_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!frame_res) return recv_client_failed(frame_res.error());
+-
+-    stage(Stage::Done);
+-
+-    // discard the recv'ed message as there is ...
+-    //
+-    // - no server connection to send it to
+-    // - and therefore no prepared statement that could be closed on the server.
+-    //
+-    // StmtParamAppendData also has no way to report errors.
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Done);
+-
+-    return forward_client_to_server();
+-  }
+-}
+diff --git a/router/src/routing/src/classic_stmt_param_append_data.h b/router/src/routing/src/classic_stmt_param_append_data.h
+deleted file mode 100644
+index 5394dc64279..00000000000
+--- a/router/src/routing/src/classic_stmt_param_append_data.h
++++ /dev/null
+@@ -1,50 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_PARAM_APPEND_DATA_INCLUDED
+-#define ROUTING_CLASSIC_STMT_PARAM_APPEND_DATA_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtParamAppendDataProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_prepare.cc b/router/src/routing/src/classic_stmt_prepare.cc
+deleted file mode 100644
+index 2c85036a16a..00000000000
+--- a/router/src/routing/src/classic_stmt_prepare.cc
++++ /dev/null
+@@ -1,250 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_prepare.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "classic_lazy_connect.h"
+-#include "hexify.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Connect:
+-      return connect();
+-    case Stage::Connected:
+-      return connected();
+-    case Stage::Response:
+-      return response();
+-    case Stage::Column:
+-      return column();
+-    case Stage::EndOfColumns:
+-      return end_of_columns();
+-    case Stage::Param:
+-      return param();
+-    case Stage::EndOfParams:
+-      return end_of_params();
+-    case Stage::Ok:
+-      return ok();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::command() {
+-  trace(Tracer::Event().stage("stmt_prepare::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    stage(Stage::Connect);
+-    return Result::Again;
+-  } else {
+-    stage(Stage::Response);
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::connect() {
+-  trace(Tracer::Event().stage("stmt_prepare::connect"));
+-
+-  stage(Stage::Connected);
+-
+-  connection()->push_processor(
+-      std::make_unique<LazyConnector>(connection(), false /* in-handshake */));
+-
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::connected() {
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    // Connector sent an server::Error already.
+-    auto *socket_splicer = connection()->socket_splicer();
+-    auto src_channel = socket_splicer->client_channel();
+-    auto src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto recv_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!recv_res) return recv_client_failed(recv_res.error());
+-
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("stmt_prepare::error"));
+-
+-    stage(Stage::Done);
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_prepare::connected"));
+-
+-  stage(Stage::Response);
+-  return forward_client_to_server();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::response() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Ok = ClassicFrame::cmd_byte<classic_protocol::message::server::Ok>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Ok:
+-      stage(Stage::Ok);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_prepare::response"));
+-
+-  return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtPrepareForwarder::ok() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  const auto msg_res =
+-      ClassicFrame::recv_msg<classic_protocol::message::server::StmtPrepareOk>(
+-          src_channel, src_protocol);
+-  if (!msg_res) return recv_server_failed(msg_res.error());
+-
+-  trace(Tracer::Event().stage("stmt_prepare::ok"));
+-
+-  auto stmt_prep_ok = *msg_res;
+-
+-  if (stmt_prep_ok.with_metadata()) {
+-    columns_left_ = stmt_prep_ok.column_count();
+-    params_left_ = stmt_prep_ok.param_count();
+-  }
+-
+-  connection()->some_state_changed(true);
+-
+-  stage(Stage::Param);
+-
+-  return forward_server_to_client(has_more_messages());
+-}
+-
+-bool StmtPrepareForwarder::has_more_messages() const {
+-  return columns_left_ != 0 || params_left_ != 0;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::param() {
+-  if (params_left_ > 0) {
+-    trace(Tracer::Event().stage("stmt_prepare::param"));
+-    if (--params_left_ == 0) {
+-      stage(Stage::EndOfParams);
+-    }
+-    return forward_server_to_client(has_more_messages());
+-  }
+-
+-  stage(Stage::Column);
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::end_of_params() {
+-  auto src_protocol = connection()->server_protocol();
+-
+-  stage(Stage::Column);
+-
+-  if (src_protocol->shared_capabilities().test(
+-          classic_protocol::capabilities::pos::
+-              text_result_with_session_tracking)) {
+-    // no end-of-params packet.
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_prepare::end_of_params"));
+-  return forward_server_to_client(has_more_messages());
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::column() {
+-  if (columns_left_ > 0) {
+-    trace(Tracer::Event().stage("stmt_prepare::column"));
+-    if (--columns_left_ == 0) {
+-      stage(Stage::EndOfColumns);
+-    }
+-    return forward_server_to_client(has_more_messages());
+-  }
+-
+-  stage(Stage::Done);
+-  return Result::Again;
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::end_of_columns() {
+-  auto src_protocol = connection()->server_protocol();
+-
+-  stage(Stage::Done);
+-
+-  if (src_protocol->shared_capabilities().test(
+-          classic_protocol::capabilities::pos::
+-              text_result_with_session_tracking)) {
+-    // no end-of-columns packet.
+-    return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_prepare::end_of_columns"));
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtPrepareForwarder::error() {
+-  trace(Tracer::Event().stage("stmt_prepare::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_stmt_prepare.h b/router/src/routing/src/classic_stmt_prepare.h
+deleted file mode 100644
+index 331b487a5cf..00000000000
+--- a/router/src/routing/src/classic_stmt_prepare.h
++++ /dev/null
+@@ -1,73 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_PREPARE_INCLUDED
+-#define ROUTING_CLASSIC_STMT_PREPARE_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtPrepareForwarder : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Connect,
+-    Connected,
+-    Response,
+-    Column,
+-    EndOfColumns,
+-    Param,
+-    EndOfParams,
+-    Ok,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> connect();
+-  stdx::expected<Result, std::error_code> connected();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> column();
+-  stdx::expected<Result, std::error_code> end_of_columns();
+-  stdx::expected<Result, std::error_code> param();
+-  stdx::expected<Result, std::error_code> end_of_params();
+-  stdx::expected<Result, std::error_code> ok();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  bool has_more_messages() const;
+-
+-  Stage stage_{Stage::Command};
+-
+-  size_t columns_left_{0};
+-  size_t params_left_{0};
+-};
+-
+-#endif
+diff --git a/router/src/routing/src/classic_stmt_reset.cc b/router/src/routing/src/classic_stmt_reset.cc
+deleted file mode 100644
+index d598c389753..00000000000
+--- a/router/src/routing/src/classic_stmt_reset.cc
++++ /dev/null
+@@ -1,131 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "classic_stmt_reset.h"
+-
+-#include "classic_connection.h"
+-#include "classic_forwarder.h"
+-#include "classic_frame.h"
+-#include "mysql/harness/stdx/expected.h"
+-#include "mysql/harness/tls_error.h"
+-#include "mysqld_error.h"  // mysql-server error-codes
+-#include "tracer.h"
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtResetProcessor::process() {
+-  switch (stage()) {
+-    case Stage::Command:
+-      return command();
+-    case Stage::Response:
+-      return response();
+-    case Stage::Ok:
+-      return ok();
+-    case Stage::Error:
+-      return error();
+-    case Stage::Done:
+-      return Result::Done;
+-  }
+-
+-  harness_assert_this_should_not_execute();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtResetProcessor::command() {
+-  trace(Tracer::Event().stage("stmt_reset::command"));
+-
+-  auto &server_conn = connection()->socket_splicer()->server_conn();
+-  if (!server_conn.is_open()) {
+-    auto *src_channel = connection()->socket_splicer()->client_channel();
+-    auto *src_protocol = connection()->client_protocol();
+-
+-    // take the client::command from the connection.
+-    auto recv_res =
+-        ClassicFrame::ensure_has_full_frame(src_channel, src_protocol);
+-    if (!recv_res) return recv_client_failed(recv_res.error());
+-
+-    discard_current_msg(src_channel, src_protocol);
+-
+-    trace(Tracer::Event().stage("stmt_reset::error"));
+-
+-    auto send_res =
+-        ClassicFrame::send_msg<classic_protocol::message::server::Error>(
+-            src_channel, src_protocol,
+-            {1243, "Unknown prepared statement handler", "HY000"});
+-    if (!send_res) return send_client_failed(send_res.error());
+-
+-    stage(Stage::Done);
+-    return Result::SendToClient;
+-  } else {
+-    stage(Stage::Response);
+-
+-    return forward_client_to_server();
+-  }
+-}
+-
+-stdx::expected<Processor::Result, std::error_code>
+-StmtResetProcessor::response() {
+-  auto *socket_splicer = connection()->socket_splicer();
+-  auto src_channel = socket_splicer->server_channel();
+-  auto src_protocol = connection()->server_protocol();
+-
+-  auto read_res =
+-      ClassicFrame::ensure_has_msg_prefix(src_channel, src_protocol);
+-  if (!read_res) return recv_server_failed(read_res.error());
+-
+-  const uint8_t msg_type = src_protocol->current_msg_type().value();
+-
+-  enum class Msg {
+-    Ok = ClassicFrame::cmd_byte<classic_protocol::message::server::Ok>(),
+-    Error = ClassicFrame::cmd_byte<classic_protocol::message::server::Error>(),
+-  };
+-
+-  switch (Msg{msg_type}) {
+-    case Msg::Ok:
+-      stage(Stage::Ok);
+-      return Result::Again;
+-    case Msg::Error:
+-      stage(Stage::Error);
+-      return Result::Again;
+-  }
+-
+-  trace(Tracer::Event().stage("stmt_reset::response"));
+-
+-  return stdx::make_unexpected(make_error_code(std::errc::bad_message));
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtResetProcessor::ok() {
+-  trace(Tracer::Event().stage("stmt_reset::ok"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+-
+-stdx::expected<Processor::Result, std::error_code> StmtResetProcessor::error() {
+-  trace(Tracer::Event().stage("stmt_reset::error"));
+-
+-  stage(Stage::Done);
+-
+-  return forward_server_to_client();
+-}
+diff --git a/router/src/routing/src/classic_stmt_reset.h b/router/src/routing/src/classic_stmt_reset.h
+deleted file mode 100644
+index d1994f91f55..00000000000
+--- a/router/src/routing/src/classic_stmt_reset.h
++++ /dev/null
+@@ -1,56 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef ROUTING_CLASSIC_STMT_RESET_INCLUDED
+-#define ROUTING_CLASSIC_STMT_RESET_INCLUDED
+-
+-#include "processor.h"
+-
+-class StmtResetProcessor : public Processor {
+- public:
+-  using Processor::Processor;
+-
+-  enum class Stage {
+-    Command,
+-    Response,
+-    Ok,
+-    Error,
+-    Done,
+-  };
+-
+-  stdx::expected<Result, std::error_code> process() override;
+-
+-  void stage(Stage stage) { stage_ = stage; }
+-  Stage stage() const { return stage_; }
+-
+- private:
+-  stdx::expected<Result, std::error_code> command();
+-  stdx::expected<Result, std::error_code> response();
+-  stdx::expected<Result, std::error_code> ok();
+-  stdx::expected<Result, std::error_code> error();
+-
+-  Stage stage_{Stage::Command};
+-};
+-
+-#endif
+-- 
+2.37.2
+

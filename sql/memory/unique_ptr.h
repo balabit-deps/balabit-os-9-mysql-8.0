@@ -162,8 +162,8 @@ class Unique_ptr {
       std::enable_if_t<std::is_same<B, std::nullptr_t>::value> * = nullptr>
   Unique_ptr();
   /**
-    Class constructor, to be used with specific allocators, passing the allocator
-    object to be used.
+    Class constructor, to be used with specific allocators, passing the
+    allocator object to be used.
 
     @param alloc The allocator instance to be used.
    */
@@ -195,9 +195,9 @@ class Unique_ptr {
                              std::is_array<D>::value> * = nullptr>
   Unique_ptr(size_t size);
   /**
-    Class constructor, to be used with specific allocators and when `T` is not an
-    array type, passing the allocator object to be used and the parameters to be
-    used with `T` object constructor.
+    Class constructor, to be used with specific allocators and when `T` is not
+    an array type, passing the allocator object to be used and the parameters to
+    be used with `T` object constructor.
 
     @param alloc The allocator instance to be used.
     @param args The parameters to be used with `T` object constructor.
@@ -207,8 +207,9 @@ class Unique_ptr {
                              !std::is_array<D>::value> * = nullptr>
   Unique_ptr(A &alloc, Args &&... args);
   /**
-    Class constructor, to be used with no specific allocators and when `T` is not
-    an array type, passing the parameters to be used with `T` object constructor.
+    Class constructor, to be used with no specific allocators and when `T` is
+    not an array type, passing the parameters to be used with `T` object
+    constructor.
 
     @param args The parameters to be used with `T` object constructor.
    */
@@ -780,7 +781,7 @@ typename memory::Unique_ptr<T, A>::pointer memory::Unique_ptr<T, A>::clone()
 #ifndef IN_DOXYGEN  // Doxygen doesn't understand this construction.
 template <typename T, std::enable_if_t<std::is_array<T>::value> *>
 memory::Unique_ptr<T, std::nullptr_t> memory::make_unique(size_t size) {
-  return std::move(memory::Unique_ptr<T, std::nullptr_t>{size});
+  return memory::Unique_ptr<T, std::nullptr_t>{size};
 }
 
 template <typename T, typename A, std::enable_if_t<std::is_array<T>::value> *>
@@ -799,8 +800,7 @@ memory::Unique_ptr<T, A> memory::make_unique(A &alloc, Args &&... args) {
 template <typename T, typename... Args,
           std::enable_if_t<!std::is_array<T>::value> *>
 memory::Unique_ptr<T, std::nullptr_t> memory::make_unique(Args &&... args) {
-  return std::move(
-      memory::Unique_ptr<T, std::nullptr_t>{std::forward<Args>(args)...});
+  return memory::Unique_ptr<T, std::nullptr_t>{std::forward<Args>(args)...};
 }
 #endif
 

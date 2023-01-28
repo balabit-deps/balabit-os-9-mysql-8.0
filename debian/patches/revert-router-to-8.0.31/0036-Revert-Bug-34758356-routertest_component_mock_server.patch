@@ -1,0 +1,48 @@
+From 3e7130b25dffbce39e7bf31a4a745f04a40de916 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:06:21 -0500
+Subject: [PATCH 36/86] Revert "Bug#34758356 routertest_component_mock_server
+ hangs"
+
+This reverts commit 0924e42ea7c8256a1dc3588329265dba40e9a1e6.
+---
+ router/tests/component/test_mock_server.cc | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/router/tests/component/test_mock_server.cc b/router/tests/component/test_mock_server.cc
+index a899c6a2965..a821504b1fa 100644
+--- a/router/tests/component/test_mock_server.cc
++++ b/router/tests/component/test_mock_server.cc
+@@ -419,8 +419,7 @@ TEST_P(MockServerConnectOkTest, x_protocol) {
+       {"hostname", "127.0.0.1"},
+   };
+ 
+-  std::vector<std::string> cmdline_args{"--logging-folder",
+-                                        get_test_temp_dir_name()};
++  std::vector<std::string> cmdline_args;
+ 
+   for (const auto &arg : GetParam().cmdline_args) {
+     if (arg.empty()) {
+@@ -586,8 +585,7 @@ TEST_P(MockServerConnectTest, check) {
+       {"hostname", "127.0.0.1"},
+   };
+ 
+-  std::vector<std::string> cmdline_args{"--logging-folder",
+-                                        get_test_temp_dir_name()};
++  std::vector<std::string> cmdline_args;
+ 
+   for (const auto &arg : GetParam().cmdline_args) {
+     if (arg.empty()) {
+@@ -1082,8 +1080,7 @@ TEST_P(MockServerCoreTest, check) {
+       {"hostname", "127.0.0.1"},
+   };
+ 
+-  std::vector<std::string> cmdline_args{"--logging-folder",
+-                                        get_test_temp_dir_name()};
++  std::vector<std::string> cmdline_args;
+ 
+   for (const auto &arg : GetParam().cmdline_args) {
+     if (arg.empty()) {
+-- 
+2.37.2
+

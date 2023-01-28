@@ -1,0 +1,87 @@
+From 1ebd0ae4cdfc0165d7fa9e11cd807b7faea6c9ad Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:02:58 -0500
+Subject: [PATCH 10/86] Revert "Bug#34824469 stacktrace tests fail with TSAN"
+
+This reverts commit e99ab36c13a50e68a2ce2f20c0079e1052d48c73.
+---
+ router/tests/component/test_router_stacktrace.cc | 15 +++++++++------
+ router/tests/component/test_stacktrace.cc        |  8 ++++----
+ 2 files changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/router/tests/component/test_router_stacktrace.cc b/router/tests/component/test_router_stacktrace.cc
+index fefcc936a12..2019f9119d9 100644
+--- a/router/tests/component/test_router_stacktrace.cc
++++ b/router/tests/component/test_router_stacktrace.cc
+@@ -53,7 +53,8 @@ constexpr const int abrt_status{
+ #endif
+ };
+ 
+-#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN) && !defined(HAVE_TSAN)
++// only used for tests that we disable for ASAN and UBSAN
++#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ constexpr const int segv_status{
+ #ifdef _WIN32
+@@ -63,7 +64,7 @@ constexpr const int segv_status{
+ #endif
+ };
+ 
+-#endif
++#endif  // !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ }  // namespace
+ 
+@@ -245,9 +246,9 @@ INSTANTIATE_TEST_SUITE_P(Spec, RouterStacktraceInvalidOptionTest,
+                          ::testing::ValuesIn(invalid_options),
+                          [](auto info) { return info.param.name; });
+ 
+-// we skip those when ASAN, UBSAN and TSAN is used as it marks them as failed
+-// seeing ABORT signal
+-#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN) && !defined(HAVE_TSAN)
++// we skip those when ASAN and UBSAN is used as it marks them as failed seeing
++// ABORT signal
++#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ // TS_3_1
+ TEST_F(RouterStacktraceTest, crash_me_via_rest_signal_abort) {
+@@ -377,7 +378,9 @@ TEST_F(RouterStacktraceTest, crash_me_via_event) {
+           ));
+ }
+ 
+-#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN) && !defined(HAVE_TSAN)
++// we skip those when ASAN or UBSAN is used as it marks them as failed seeing
++// ABORT signal
++#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ // TS_3_1
+ TEST_F(RouterStacktraceTest, crash_me_core_file_1) {
+diff --git a/router/tests/component/test_stacktrace.cc b/router/tests/component/test_stacktrace.cc
+index 536876c0dd7..03a7430f141 100644
+--- a/router/tests/component/test_stacktrace.cc
++++ b/router/tests/component/test_stacktrace.cc
+@@ -82,9 +82,9 @@ TEST_F(StacktraceTest, spawn_signal_abrt) {
+   EXPECT_NO_THROW(proc.native_wait_for_exit());  // timeout throws
+ }
+ 
+-// we skip that one when ASAN, UBSAN or TSAN is used as it marks them as failed
+-// seeing ABORT signal
+-#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN) && !defined(HAVE_TSAN)
++// we skip that one when ASAN or UBSAN is used as it marks them as failed seeing
++// ABORT signal
++#if !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ TEST_F(StacktraceTest, spawn_signal_segv) {
+   auto executable = g_origin_path.join("signal_me").str();
+@@ -105,7 +105,7 @@ TEST_F(StacktraceTest, spawn_signal_segv) {
+   EXPECT_NO_THROW(proc.native_wait_for_exit());  // timeout throws
+ }
+ 
+-#endif
++#endif  // !defined(HAVE_ASAN) && !defined(HAVE_UBSAN)
+ 
+ int main(int argc, char *argv[]) {
+   g_origin_path = mysql_harness::Path(argv[0]).dirname();
+-- 
+2.37.2
+

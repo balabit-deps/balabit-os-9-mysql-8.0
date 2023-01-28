@@ -18,11 +18,13 @@ usr/lib/mysql/plugin/component_test_audit_api_message.so
 usr/lib/mysql/plugin/component_test_backup_lock_service.so
 usr/lib/mysql/plugin/component_test_component_deinit.so
 usr/lib/mysql/plugin/component_test_host_application_signal.so
+usr/lib/mysql/plugin/component_test_mysql_command_services.so
 usr/lib/mysql/plugin/component_test_mysql_runtime_error.so
 usr/lib/mysql/plugin/component_test_mysql_system_variable_set.so
 usr/lib/mysql/plugin/component_test_pfs_notification.so
 usr/lib/mysql/plugin/component_test_pfs_resource_group.so
 usr/lib/mysql/plugin/component_test_sensitive_system_variables.so
+usr/lib/mysql/plugin/component_test_status_var_reader.so
 usr/lib/mysql/plugin/component_test_status_var_service.so
 usr/lib/mysql/plugin/component_test_status_var_service_int.so
 usr/lib/mysql/plugin/component_test_status_var_service_reg_only.so
@@ -85,6 +87,7 @@ usr/lib/mysql/plugin/qa_auth_server.so
 usr/lib/mysql/plugin/replication_observers_example_plugin.so
 usr/lib/mysql/plugin/rewrite_example.so
 usr/lib/mysql/plugin/test_security_context.so
+usr/lib/mysql/plugin/test_services_command_services.so
 usr/lib/mysql/plugin/test_services_host_application_signal.so
 usr/lib/mysql/plugin/test_services_plugin_registry.so
 usr/lib/mysql/plugin/test_udf_services.so

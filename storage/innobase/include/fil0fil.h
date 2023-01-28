@@ -554,7 +554,7 @@ constexpr size_t FIL_SPACE_MAGIC_N = 89472;
 /** Value of fil_node_t::magic_n */
 constexpr size_t FIL_NODE_MAGIC_N = 89389;
 
-/** Common InnoDB file extentions */
+/** Common InnoDB file extensions */
 enum ib_file_suffix {
   NO_EXT = 0,
   IBD = 1,
@@ -746,9 +746,9 @@ class Fil_path {
   [[nodiscard]] bool is_circular() const;
 
   /** Determine if the file or directory is considered HIDDEN.
-  Most file systems identify the HIDDEN attribute by a '.' preceeding the
+  Most file systems identify the HIDDEN attribute by a '.' preceding the
   basename.  On Windows, a HIDDEN path is identified by a file attribute.
-  We will use the preceeding '.' to indicate a HIDDEN attribute on ALL
+  We will use the preceding '.' to indicate a HIDDEN attribute on ALL
   file systems so that InnoDB tablespaces and their directory structure
   remain portable.
   @param[in]  path  The full or relative path of a file or directory.
@@ -980,7 +980,7 @@ class Fil_path {
 
   /** Allocate and build a file name from a path, a table or
   tablespace name and a suffix.
-  @param[in]    path_in         nullptr or the direcory path or
+  @param[in]    path_in         nullptr or the directory path or
                                   the full path and filename
   @param[in]    name_in         nullptr if path is full, or
                                   Table/Tablespace name
@@ -1008,7 +1008,7 @@ class Fil_path {
 
   /** Allocate and build a file name from a path, a table or
   tablespace name and a suffix.
-  @param[in]    path_in         nullptr or the direcory path or
+  @param[in]    path_in         nullptr or the directory path or
                                   the full path and filename
   @param[in]    name_in         nullptr if path is full, or
                                   Table/Tablespace name
@@ -1252,7 +1252,7 @@ constexpr page_type_t FIL_PAGE_ENCRYPTED_RTREE = 17;
 /** Uncompressed SDI BLOB page */
 constexpr page_type_t FIL_PAGE_SDI_BLOB = 18;
 
-/** Commpressed SDI BLOB page */
+/** Compressed SDI BLOB page */
 constexpr page_type_t FIL_PAGE_SDI_ZBLOB = 19;
 
 /** Legacy doublewrite buffer page. */
@@ -1798,34 +1798,6 @@ void fil_page_reset_type(const page_id_t &page_id, byte *page, ulint type,
 inline page_type_t fil_page_get_type(const byte *page) {
   return (static_cast<page_type_t>(mach_read_from_2(page + FIL_PAGE_TYPE)));
 }
-/** Check (and if needed, reset) the page type.
-Data files created before MySQL 5.1 may contain
-garbage in the FIL_PAGE_TYPE field.
-In MySQL 3.23.53, only undo log pages and index pages were tagged.
-Any other pages were written with uninitialized bytes in FIL_PAGE_TYPE.
-@param[in]      page_id         Page number
-@param[in,out]  page            Page with possibly invalid FIL_PAGE_TYPE
-@param[in]      type            Expected page type
-@param[in,out]  mtr             Mini-transaction */
-inline void fil_page_check_type(const page_id_t &page_id, byte *page,
-                                ulint type, mtr_t *mtr) {
-  ulint page_type = fil_page_get_type(page);
-
-  if (page_type != type) {
-    fil_page_reset_type(page_id, page, type, mtr);
-  }
-}
-
-/** Check (and if needed, reset) the page type.
-Data files created before MySQL 5.1 may contain
-garbage in the FIL_PAGE_TYPE field.
-In MySQL 3.23.53, only undo log pages and index pages were tagged.
-Any other pages were written with uninitialized bytes in FIL_PAGE_TYPE.
-@param[in,out]  block           Block with possibly invalid FIL_PAGE_TYPE
-@param[in]      type            Expected page type
-@param[in,out]  mtr             Mini-transaction */
-#define fil_block_check_type(block, type, mtr) \
-  fil_page_check_type(block->page.id, block->frame, type, mtr)
 
 #ifdef UNIV_DEBUG
 /** Increase redo skipped count for a tablespace.
@@ -1914,7 +1886,7 @@ struct PageCallback {
 };
 
 /** Iterate over all the pages in the tablespace.
-@param[in]  table the table definiton in the server
+@param[in]  table the table definition in the server
 @param[in]  n_io_buffers number of blocks to read and write together
 @param[in]  compression_type compression type if compression is enabled,
 else Compression::Type::NONE
@@ -2268,5 +2240,4 @@ size_t fil_count_undo_deleted(space_id_t undo_num);
 @param[in]  type  the page type to be checked for validity.
 @return true if it is valid page type, false otherwise. */
 [[nodiscard]] bool fil_is_page_type_valid(page_type_t type) noexcept;
-
 #endif /* fil0fil_h */

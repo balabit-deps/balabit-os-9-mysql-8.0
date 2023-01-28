@@ -541,6 +541,7 @@ bool Gcs_xcom_control::send_add_node_request(
   // Go through the seed list S_CONNECTION_ATTEMPTS times.
   for (int attempt_nr = 0;
        !add_node_accepted && attempt_nr < CONNECTION_ATTEMPTS; attempt_nr++) {
+    if (m_view_control->is_finalized()) break;
     add_node_accepted = try_send_add_node_request_to_seeds(my_addresses);
   }
 
@@ -560,6 +561,8 @@ bool Gcs_xcom_control::try_send_add_node_request_to_seeds(
     bool connected = false;
     connection_descriptor *con = nullptr;
     std::tie(connected, con) = connect_to_peer(peer, my_addresses);
+
+    if (m_view_control->is_finalized()) break;
 
     if (connected) {
       MYSQL_GCS_LOG_INFO("Sucessfully connected to peer "
@@ -1181,7 +1184,7 @@ bool Gcs_xcom_control::xcom_receive_local_view(synode_no const config_id,
       Identify which nodes are alive and which are considered faulty.
 
       Note that there may be new nodes that are marked as faulty because the
-      connections among their peers are still beeing established.
+      connections among their peers are still being established.
     */
     build_total_members(xcom_nodes, alive_members, failed_members);
 
@@ -1398,7 +1401,7 @@ bool Gcs_xcom_control::xcom_receive_global_view(synode_no const config_id,
     Identify which nodes are alive and which are considered faulty.
 
     Note that there may be new nodes that are marked as faulty because the
-    connections among their peers are still beeing established.
+    connections among their peers are still being established.
   */
   build_total_members(xcom_nodes, alive_members, failed_members);
 

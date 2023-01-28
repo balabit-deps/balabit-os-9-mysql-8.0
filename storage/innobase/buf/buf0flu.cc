@@ -87,7 +87,7 @@ static uint buf_flush_lsn_scan_factor = 3;
 static lsn_t buf_flush_sync_lsn = 0;
 
 #ifdef UNIV_DEBUG
-/** Get the lsn upto which data pages are to be synchronously flushed.
+/** Get the lsn up to which data pages are to be synchronously flushed.
 @return target lsn for the requested flush_sync */
 lsn_t get_flush_sync_lsn() noexcept { return buf_flush_sync_lsn; }
 #endif /* UNIV_DEBUG */
@@ -132,7 +132,7 @@ struct page_cleaner_slot_t {
   /*!< number of requested pages
   for the slot */
   /* These values are updated during state==PAGE_CLEANER_STATE_FLUSHING,
-  and commited with state==PAGE_CLEANER_STATE_FINISHED.
+  and committed with state==PAGE_CLEANER_STATE_FINISHED.
   The consistency is protected by the 'state' */
   ulint n_flushed_lru;
   /*!< number of flushed pages
@@ -1216,13 +1216,6 @@ static void buf_flush_write_block_low(buf_page_t *bpage, buf_flush_t flush_type,
     }
   }
 
-  DBUG_EXECUTE_IF("log_first_rec_group_test", {
-    recv_no_ibuf_operations = false;
-    const lsn_t end_lsn = mtr_commit_mlog_test();
-    log_write_up_to(*log_sys, end_lsn, true);
-    DBUG_SUICIDE();
-  });
-
   switch (buf_page_get_state(bpage)) {
     case BUF_BLOCK_POOL_WATCH:
     case BUF_BLOCK_ZIP_PAGE: /* The page should be dirty. */
@@ -1822,6 +1815,7 @@ static ulint buf_flush_LRU_list_batch(buf_pool_t *buf_pool, ulint max) {
 
     free_len = UT_LIST_GET_LEN(buf_pool->free);
     lru_len = UT_LIST_GET_LEN(buf_pool->LRU);
+    withdraw_depth = buf_get_withdraw_depth(buf_pool);
   }
 
   buf_pool->lru_hp.set(nullptr);
@@ -3267,10 +3261,22 @@ static void buf_flush_page_coordinator_thread() {
     /* We consider server active if either we have just discovered a first
     activity after a period of inactive server, or we are after the period
     of active server in which case, it could be just the beginning of the
-    next period, so there is no reason to consider it idle yet. */
+    next period, so there is no reason to consider it idle yet.
+    The withdrawing blocks process when shrinking the buffer pool always
+    needs the page_cleaner activity. So, we consider server is active
+    during the withdrawing blocks process also. */
 
-    const bool is_server_active =
-        was_server_active || srv_check_activity(last_activity);
+    bool is_withdrawing = false;
+    for (ulint i = 0; i < srv_buf_pool_instances; i++) {
+      buf_pool_t *buf_pool = buf_pool_from_array(i);
+      if (buf_get_withdraw_depth(buf_pool) > 0) {
+        is_withdrawing = true;
+        break;
+      }
+    }
+
+    const bool is_server_active = is_withdrawing || was_server_active ||
+                                  srv_check_activity(last_activity);
 
     /* The page_cleaner skips sleep if the server is
     idle and there are no pending IOs in the buffer pool
@@ -3537,8 +3543,19 @@ static void buf_flush_page_coordinator_thread() {
   buf_flush_wait_LRU_batch_end();
 
   bool success;
+  bool are_any_read_ios_still_underway;
 
   do {
+    /* If there are any read operations pending, they can result in the ibuf
+    merges and a dirtying page after the read is completed. If there are any
+    IO reads running before we run the flush loop, we risk having some dirty
+    pages after flushing reports n_flushed == 0. The ibuf change merging on
+    page results in dirtying the page and is followed by decreasing the
+    n_pend_reads counter, thus it's safe to check it before flush loop and
+    have guarantees if it was seen with value of 0. These reads could be issued
+    in the previous stage(s), the srv_master thread on shutdown tasks clear the
+    ibuf unless it's the fast shutdown. */
+    are_any_read_ios_still_underway = buf_get_n_pending_read_ios() > 0;
     pc_request(ULINT_MAX, LSN_MAX);
 
     while (pc_flush_slot() > 0) {
@@ -3553,7 +3570,7 @@ static void buf_flush_page_coordinator_thread() {
     buf_flush_wait_batch_end(nullptr, BUF_FLUSH_LIST);
     buf_flush_wait_LRU_batch_end();
 
-  } while (!success || n_flushed > 0);
+  } while (!success || n_flushed > 0 || are_any_read_ios_still_underway);
 
   for (ulint i = 0; i < srv_buf_pool_instances; i++) {
     buf_pool_t *buf_pool = buf_pool_from_array(i);

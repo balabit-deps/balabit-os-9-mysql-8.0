@@ -1,0 +1,160 @@
+From 68f909808fb66e488b4fe330896bc57345388a00 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:08:28 -0500
+Subject: [PATCH 47/86] Revert "Bug#34633540
+ routertest_integration_routing_sharing with out-of-fds"
+
+This reverts commit 2079dd4453ccec2c0fc47992218634c64b7eb906.
+---
+ .../tests/integration/test_routing_sharing.cc | 64 ++++++++-----------
+ 1 file changed, 27 insertions(+), 37 deletions(-)
+
+diff --git a/router/tests/integration/test_routing_sharing.cc b/router/tests/integration/test_routing_sharing.cc
+index b0d10fde3e0..2f206786706 100644
+--- a/router/tests/integration/test_routing_sharing.cc
++++ b/router/tests/integration/test_routing_sharing.cc
+@@ -1416,7 +1416,17 @@ class ShareConnectionTestWithRestartedServer
+         std::make_unique<SharedRouter>(test_env->port_pool(), 128, false);
+   }
+ 
+-  static void TearDownTestSuite() { shared_router_.reset(); }
++  static void TearDownTestSuite() {
++    for (auto &inter : intermediate_routers_) {
++      if (::testing::Test::HasFatalFailure()) {
++        inter->process_manager().dump_logs();
++      }
++
++      inter.reset();
++    }
++
++    shared_router_.reset();
++  }
+ 
+   static std::array<SharedServer *, kNumServers> shared_servers() {
+     auto s = test_env->servers();
+@@ -1459,31 +1469,12 @@ class ShareConnectionTestWithRestartedServer
+     }
+   }
+ 
+-  void TearDown() override {
+-    for (auto &inter : intermediate_routers_) {
+-      if (!inter->is_running()) {
+-        if (::testing::Test::HasFatalFailure()) {
+-          inter->process_manager().dump_logs();
+-        }
+-
+-        inter->process_manager().clear();
+-      }
+-    }
++  void TearDown() override { shared_router_->process_manager().clear(); }
+ 
+-    shared_router_->process_manager().clear();
+-  }
+-
+-  static void wait_stopped_intermediate_router(SharedRestartableRouter *inter) {
+-    ASSERT_NO_ERROR(inter->process_manager().wait_for_exit());
+-
+-    inter->process_manager().clear();
+-  }
+-
+-  static void stop_intermediate_router(SharedRestartableRouter *inter,
+-                                       bool wait_for_stopped = true) {
++  static void stop_intermediate_router(SharedRestartableRouter *inter) {
+     inter->shutdown();
+ 
+-    if (wait_for_stopped) wait_stopped_intermediate_router(inter);
++    ASSERT_NO_ERROR(inter->process_manager().wait_for_exit());
+   }
+ 
+   static void start_intermediate_router_for_server(
+@@ -10403,14 +10394,13 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+   }
+ 
+   // shut down the intermediate routers while the connection is pooled.
+-  for (auto &inter : intermediate_routers()) {
+-    ASSERT_NO_FATAL_FAILURE(
+-        stop_intermediate_router(inter, false /* wait_for_stopped */));
++  for (auto &r : intermediate_routers()) {
++    r->shutdown();
+   }
+ 
+   // wait for the intermediate router to shutdown
+-  for (auto &inter : intermediate_routers()) {
+-    ASSERT_NO_FATAL_FAILURE(wait_stopped_intermediate_router(inter));
++  for (auto &r : intermediate_routers()) {
++    ASSERT_NO_ERROR(r->process_manager().wait_for_exit());
+   }
+ 
+   // caps for the error-packet parser
+@@ -10762,8 +10752,9 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+     for (auto [ndx, s] : enumerate(shared_servers())) {
+       if (s->server_port() != my_port) {
+         auto inter = intermediate_routers()[ndx];
++        inter->shutdown();
+ 
+-        ASSERT_NO_FATAL_FAILURE(stop_intermediate_router(inter));
++        ASSERT_NO_ERROR(inter->process_manager().wait_for_exit());
+         ++nodes_shutdown;
+       }
+     }
+@@ -10805,7 +10796,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+       if (s->server_port() == my_port) {
+         auto inter = intermediate_routers()[ndx];
+ 
+-        ASSERT_NO_FATAL_FAILURE(stop_intermediate_router(inter));
++        this->stop_intermediate_router(inter);
+       } else {
+         if (started == 0) {
+           auto inter = intermediate_routers()[ndx];
+@@ -10927,8 +10918,9 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+     for (auto [ndx, s] : enumerate(shared_servers())) {
+       if (s->server_port() != my_port) {
+         auto inter = intermediate_routers()[ndx];
+-        ASSERT_NO_FATAL_FAILURE(stop_intermediate_router(inter));
++        inter->shutdown();
+ 
++        ASSERT_NO_ERROR(inter->process_manager().wait_for_exit());
+         ++nodes_shutdown;
+       }
+     }
+@@ -11104,7 +11096,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+         if (s->server_port() != my_port) {
+           auto inter = intermediate_routers()[ndx];
+ 
+-          ASSERT_NO_FATAL_FAILURE(this->stop_intermediate_router(inter));
++          this->stop_intermediate_router(inter);
+ 
+           ++nodes_shutdown;
+ 
+@@ -11230,8 +11222,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+       for (auto [ndx, s] : enumerate(shared_servers())) {
+         if (s->server_port() != my_port) {
+           auto inter = intermediate_routers()[ndx];
+-
+-          ASSERT_NO_FATAL_FAILURE(this->stop_intermediate_router(inter));
++          this->stop_intermediate_router(inter);
+ 
+           ++nodes_shutdown;
+ 
+@@ -11259,8 +11250,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+       for (auto [ndx, s] : enumerate(shared_servers())) {
+         if (s->server_port() == my_port) {
+           auto inter = intermediate_routers()[ndx];
+-
+-          ASSERT_NO_FATAL_FAILURE(this->stop_intermediate_router(inter));
++          this->stop_intermediate_router(inter);
+ 
+           ++nodes_shutdown;
+ 
+@@ -11348,7 +11338,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+     if (s->server_port() == my_port) {
+       auto inter = intermediate_routers()[ndx];
+ 
+-      ASSERT_NO_FATAL_FAILURE(this->stop_intermediate_router(inter));
++      this->stop_intermediate_router(inter);
+ 
+       ++nodes_shutdown;
+     }
+-- 
+2.37.2
+

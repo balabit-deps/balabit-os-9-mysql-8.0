@@ -1,0 +1,31 @@
+From 05c323ace8b1df772754d6a6cdaa0d68b35dfe0f Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:06 -0500
+Subject: [PATCH 74/86] Revert "WL#12772 connection-sharing [3/28] -
+ get_option()"
+
+This reverts commit 21e9a9b9aad17b3a7d8fdd83c3c7555811ebe73b.
+---
+ router/src/routing/src/basic_protocol_splicer.h | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/router/src/routing/src/basic_protocol_splicer.h b/router/src/routing/src/basic_protocol_splicer.h
+index 9d25a55c88f..d0fc54e3946 100644
+--- a/router/src/routing/src/basic_protocol_splicer.h
++++ b/router/src/routing/src/basic_protocol_splicer.h
+@@ -242,12 +242,6 @@ class BasicConnection : public ConnectionBase {
+     return oss.str();
+   }
+ 
+-  template <class GettableSocketOption>
+-  stdx::expected<void, std::error_code> get_option(
+-      GettableSocketOption &opt) const {
+-    return sock_.get_option(opt);
+-  }
+-
+  protected:
+   socket_type sock_;
+   endpoint_type ep_;
+-- 
+2.37.2
+

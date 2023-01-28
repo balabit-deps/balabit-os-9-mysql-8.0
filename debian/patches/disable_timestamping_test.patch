@@ -1,0 +1,15 @@
+Description: disable test that fails to build on certain archs because of
+ the presence of sizeof in macros.
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+Forwarded: no
+
+--- a/router/src/harness/tests/CMakeLists.txt
++++ b/router/src/harness/tests/CMakeLists.txt
+@@ -180,7 +180,3 @@ ADD_DEPENDENCIES(mysqlrouter_all net_ts_
+ MYSQL_ADD_EXECUTABLE(acl_cli acl_cli.cc SKIP_INSTALL)
+ TARGET_LINK_LIBRARIES(acl_cli harness-library)
+ ADD_DEPENDENCIES(mysqlrouter_all acl_cli)
+-
+-MYSQL_ADD_EXECUTABLE(linux_timestamping linux_timestamping.cc SKIP_INSTALL)
+-TARGET_LINK_LIBRARIES(linux_timestamping harness_net_ts harness_stdx)
+-ADD_DEPENDENCIES(mysqlrouter_all linux_timestamping)

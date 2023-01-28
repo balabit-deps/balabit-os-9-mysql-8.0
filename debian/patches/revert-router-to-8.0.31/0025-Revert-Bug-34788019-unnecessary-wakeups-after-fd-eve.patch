@@ -1,0 +1,564 @@
+From eec6c55cb2ce6b39c77fafeb8f153732b8fce6b8 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:04:59 -0500
+Subject: [PATCH 25/86] Revert "Bug#34788019 unnecessary wakeups after
+ fd-event-add"
+
+This reverts commit 9ea3878db8eee72e69b0512751d226d7d59faf9a.
+---
+ .../include/mysql/harness/net_ts/executor.h   |  14 +-
+ .../mysql/harness/net_ts/impl/callstack.h     | 174 ------------------
+ .../include/mysql/harness/net_ts/io_context.h |  84 ++++-----
+ .../include/mysql/harness/net_ts/timer.h      |  13 +-
+ router/src/harness/tests/CMakeLists.txt       |   1 -
+ .../tests/test_net_ts_impl_callstack.cc       | 103 -----------
+ 6 files changed, 50 insertions(+), 339 deletions(-)
+ delete mode 100644 router/src/harness/include/mysql/harness/net_ts/impl/callstack.h
+ delete mode 100644 router/src/harness/tests/test_net_ts_impl_callstack.cc
+
+diff --git a/router/src/harness/include/mysql/harness/net_ts/executor.h b/router/src/harness/include/mysql/harness/net_ts/executor.h
+index b4b0675ffac..61a8dc39bc9 100644
+--- a/router/src/harness/include/mysql/harness/net_ts/executor.h
++++ b/router/src/harness/include/mysql/harness/net_ts/executor.h
+@@ -40,7 +40,6 @@
+ #include <utility>
+ 
+ #include "my_compiler.h"
+-#include "mysql/harness/net_ts/impl/callstack.h"
+ #include "mysql/harness/net_ts/netfwd.h"
+ 
+ namespace net {
+@@ -895,9 +894,7 @@ class strand {
+ 
+   inner_executor_type get_inner_executor() const noexcept { return inner_ex_; }
+ 
+-  bool running_in_this_thread() const noexcept {
+-    return impl::Callstack<strand>::contains(this) != nullptr;
+-  }
++  bool running_in_this_thread() const noexcept;
+ 
+   execution_context &context() const noexcept { return inner_ex_.context(); }
+ 
+@@ -905,11 +902,7 @@ class strand {
+   void on_work_finished() const noexcept { inner_ex_.on_work_finished(); }
+ 
+   template <class Func, class ProtoAllocator>
+-  void dispatch(Func &&f, const ProtoAllocator & /* a */) const {
+-    if (running_in_this_thread()) {
+-      std::forward<Func>(f)();
+-    }
+-  }
++  void dispatch(Func &&f, const ProtoAllocator &a) const;
+   template <class Func, class ProtoAllocator>
+   void post(Func &&f, const ProtoAllocator &a) const;
+   template <class Func, class ProtoAllocator>
+@@ -917,9 +910,6 @@ class strand {
+ 
+  private:
+   Executor inner_ex_;
+-
+-  bool running_{false};
+-  std::queue<std::function<void()>> jobs_;
+ };
+ 
+ template <class Executor>
+diff --git a/router/src/harness/include/mysql/harness/net_ts/impl/callstack.h b/router/src/harness/include/mysql/harness/net_ts/impl/callstack.h
+deleted file mode 100644
+index af1b012afb8..00000000000
+--- a/router/src/harness/include/mysql/harness/net_ts/impl/callstack.h
++++ /dev/null
+@@ -1,174 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQL_HARNESS_NET_TS_IMPL_CALLSTACK_H_
+-#define MYSQL_HARNESS_NET_TS_IMPL_CALLSTACK_H_
+-
+-namespace net::impl {
+-
+-/**
+- * callstack of a thread.
+- *
+- * use-cases:
+- * - track debuginfo of call chains
+- * - check if the function calls itself
+- *
+- * Each new stackframe links to the previous stackframe and sets itself as
+- * stacktop. As callstacks are per-thread, no locking is needed.
+- *
+- * # Usage
+- *
+- * @code
+- * struct Frame {
+- *   const char *filename;
+- *   int line;
+- *   const char *func;
+- *
+- *   Frame(const char *f, int l, const char *fun):
+- *     filename(f), line(l), func(fun) {}
+- * };
+- * void a() {
+- *   Frame frame(__FILE__, __LINE__, __func__);
+- *   Callstack<Frame>::Context stackframe(&frame);
+- * }
+- *
+- * void b() {
+- *   // store a frame on the functions stack
+- *   Frame frame(__FILE__, __LINE__, __func__);
+- *   // link the 'frame' to the callstack
+- *   Callstack<Frame>::Context stackframe(&frame);
+- *
+- *   a();
+- * }
+- * @endcode
+- *
+- * @tparam Key   key-type
+- * @tparam Value value-type to assign to the key
+- */
+-template <class Key, class Value = unsigned char>
+-class Callstack {
+- public:
+-  class Context;
+-  class Iterator;
+-
+-  using value_type = Context *;
+-  using iterator = Iterator;
+-  using const_iterator = Iterator;
+-
+-  class Context {
+-   public:
+-    /**
+-     * construct a stackframe.
+-     *
+-     * sets top of stack to this frame.
+-     */
+-    explicit Context(const Key *k)
+-        : Context(k, reinterpret_cast<Value &>(*this)) {}
+-
+-    Context(const Key *k, Value &v)
+-        : key_{k}, value_{&v}, next_{Callstack<Key, Value>::stack_top_} {
+-      Callstack<Key, Value>::stack_top_ = this;
+-    }
+-
+-    /**
+-     * destruct a stackframe.
+-     *
+-     * sets top of stack to the previous stackframe.
+-     */
+-    ~Context() { Callstack<Key, Value>::stack_top_ = next_; }
+-
+-    // disable copy construct and copy-assign
+-    Context(const Context &) = delete;
+-    Context &operator=(const Context &) = delete;
+-
+-    const Key *key() const { return key_; }
+-    Value *value() const { return value_; }
+-
+-   private:
+-    friend class Callstack<Key, Value>;
+-    friend class Callstack<Key, Value>::Iterator;
+-
+-    const Key *key_;
+-    Value *value_;
+-
+-    Context *next_; /**!< next stackframe */
+-  };
+-
+-  /**
+-   * forward-iterator over stack frames.
+-   *
+-   * just enough to implement for-range loops
+-   */
+-  class Iterator {
+-   public:
+-    Iterator(Context *ctx) : ctx_{ctx} {}
+-
+-    Iterator &operator++() {
+-      if (ctx_ != nullptr) ctx_ = ctx_->next_;
+-      return *this;
+-    }
+-
+-    bool operator!=(const Iterator &other) const { return ctx_ != other.ctx_; }
+-
+-    Context *operator*() { return ctx_; }
+-
+-   private:
+-    Context *ctx_;
+-  };
+-
+-  /**
+-   * check if a callstack contains a pointer already.
+-   *
+-   * walks the stack from the top the last element and checks if a frames key
+-   * makes k
+-   *
+-   * @param k key to search for in the callstack
+-   * @returns stored value if key is found
+-   * @retval nullptr if not found.
+-   */
+-  static constexpr Value *contains(const Key *k) {
+-    for (auto *e : Callstack<Key, Value>()) {
+-      if (e->key() == k) return e->value();
+-    }
+-
+-    return nullptr;
+-  }
+-
+-  /** begin() iterator */
+-  static Iterator begin() { return Iterator(stack_top_); }
+-  /** end() iterator */
+-  static Iterator end() { return Iterator(nullptr); }
+-
+- private:
+-  static thread_local Context *stack_top_;
+-};
+-
+-// define thread-local initial stack-top
+-template <class Key, class Value>
+-thread_local
+-    typename Callstack<Key, Value>::Context *Callstack<Key, Value>::stack_top_ =
+-        nullptr;
+-}  // namespace net::impl
+-
+-#endif
+diff --git a/router/src/harness/include/mysql/harness/net_ts/io_context.h b/router/src/harness/include/mysql/harness/net_ts/io_context.h
+index 833bdc7dcd9..96e3bc060ef 100644
+--- a/router/src/harness/include/mysql/harness/net_ts/io_context.h
++++ b/router/src/harness/include/mysql/harness/net_ts/io_context.h
+@@ -40,7 +40,6 @@
+ 
+ #include "my_config.h"  // HAVE_EPOLL
+ #include "mysql/harness/net_ts/executor.h"
+-#include "mysql/harness/net_ts/impl/callstack.h"
+ #include "mysql/harness/net_ts/impl/kqueue_io_service.h"
+ #include "mysql/harness/net_ts/impl/linux_epoll_io_service.h"
+ #include "mysql/harness/net_ts/impl/poll_io_service.h"
+@@ -118,7 +117,7 @@ class io_context : public execution_context {
+       stopped_ = true;
+     }
+ 
+-    notify_io_service_if_not_running_in_this_thread();
++    io_service_->notify();
+   }
+ 
+   bool stopped() const noexcept {
+@@ -249,7 +248,7 @@ class io_context : public execution_context {
+     deferred_work_.post(std::forward<Func>(f), a);
+ 
+     // wakeup the possibly blocked io-thread.
+-    notify_io_service_if_not_running_in_this_thread();
++    io_service()->notify();
+   }
+ 
+   template <class Clock, class Duration>
+@@ -505,7 +504,7 @@ class io_context : public execution_context {
+       }
+     }
+ 
+-    notify_io_service_if_not_running_in_this_thread();
++    io_service_->notify();
+   }
+ 
+   class timer_queue_base : public execution_context::service {
+@@ -821,7 +820,7 @@ class io_context : public execution_context {
+     queue.push(timer, std::forward<Op>(op));
+ 
+     // wakeup the blocked poll_one() to handle possible timer events.
+-    notify_io_service_if_not_running_in_this_thread();
++    io_service_->notify();
+   }
+ 
+   /**
+@@ -836,7 +835,7 @@ class io_context : public execution_context {
+     const auto count = use_service<timer_queue<Timer>>(*this).cancel(timer);
+     if (count) {
+       // if a timer was canceled, interrupt the io-service
+-      notify_io_service_if_not_running_in_this_thread();
++      io_service_->notify();
+     }
+     return count;
+   }
+@@ -892,8 +891,6 @@ class io_context : public execution_context {
+ 
+   void is_running(bool v) { is_running_ = v; }
+   bool is_running() const { return is_running_; }
+-
+-  void notify_io_service_if_not_running_in_this_thread();
+ };
+ }  // namespace net
+ 
+@@ -986,6 +983,34 @@ inline io_context::count_type io_context::poll_one() {
+   return do_one(lk, 0ms);
+ }
+ 
++/**
++ * cancel all async-ops of a file-descriptor.
++ */
++inline stdx::expected<void, std::error_code> io_context::cancel(
++    native_handle_type fd) {
++  bool need_notify{false};
++  {
++    // check all async-ops
++    std::lock_guard<std::mutex> lk(mtx_);
++
++    while (auto op = active_ops_.extract_first(fd)) {
++      op->cancel();
++
++      cancelled_ops_.push_back(std::move(op));
++
++      need_notify = true;
++    }
++  }
++
++  // wakeup the loop to deliver the cancelled fds
++  if (true || need_notify) {
++    io_service_->remove_fd(fd);
++    io_service_->notify();
++  }
++
++  return {};
++}
++
+ class io_context::executor_type {
+  public:
+   executor_type(const executor_type &rhs) noexcept = default;
+@@ -996,7 +1021,11 @@ class io_context::executor_type {
+   ~executor_type() = default;
+ 
+   bool running_in_this_thread() const noexcept {
+-    return impl::Callstack<io_context>::contains(io_ctx_) != nullptr;
++    // TODO: check if this task is running in this thread. Currently, it is
++    // "yes", as we don't allow post()ing to other threads
++
++    // track call-chain
++    return true;
+   }
+   io_context &context() const noexcept { return *io_ctx_; }
+ 
+@@ -1080,35 +1109,6 @@ inline io_context::executor_type io_context::get_executor() noexcept {
+   return executor_type(*this);
+ }
+ 
+-/**
+- * cancel all async-ops of a file-descriptor.
+- */
+-inline stdx::expected<void, std::error_code> io_context::cancel(
+-    native_handle_type fd) {
+-  bool need_notify{false};
+-  {
+-    // check all async-ops
+-    std::lock_guard<std::mutex> lk(mtx_);
+-
+-    while (auto op = active_ops_.extract_first(fd)) {
+-      op->cancel();
+-
+-      cancelled_ops_.push_back(std::move(op));
+-
+-      need_notify = true;
+-    }
+-  }
+-
+-  // wakeup the loop to deliver the cancelled fds
+-  if (true || need_notify) {
+-    io_service_->remove_fd(fd);
+-
+-    notify_io_service_if_not_running_in_this_thread();
+-  }
+-
+-  return {};
+-}
+-
+ template <class Clock, class Duration>
+ inline io_context::count_type io_context::do_one_until(
+     std::unique_lock<std::mutex> &lk,
+@@ -1130,17 +1130,9 @@ inline io_context::count_type io_context::do_one_until(
+   return do_one(lk, rel_time_ms);
+ }
+ 
+-inline void io_context::notify_io_service_if_not_running_in_this_thread() {
+-  if (impl::Callstack<io_context>::contains(this) == nullptr) {
+-    io_service_->notify();
+-  }
+-}
+-
+ // precond: lk MUST be locked
+ inline io_context::count_type io_context::do_one(
+     std::unique_lock<std::mutex> &lk, std::chrono::milliseconds timeout) {
+-  impl::Callstack<io_context>::Context ctx(this);
+-
+   timer_queue_base *timer_q{nullptr};
+ 
+   monitor mon(*this);
+diff --git a/router/src/harness/include/mysql/harness/net_ts/timer.h b/router/src/harness/include/mysql/harness/net_ts/timer.h
+index b5d5c0a21e5..9c41ea43d31 100644
+--- a/router/src/harness/include/mysql/harness/net_ts/timer.h
++++ b/router/src/harness/include/mysql/harness/net_ts/timer.h
+@@ -114,13 +114,20 @@ class basic_waitable_timer {
+     return expires_at(clock_type::now() + d);
+   }
+ 
++  MY_COMPILER_DIAGNOSTIC_PUSH()
++  MY_COMPILER_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-declarations")
+   stdx::expected<void, std::error_code> wait() {
+-    while (clock_type::now() < expiry_) {
+-      std::this_thread::sleep_for(traits_type::to_wait_duration(expiry_));
+-    }
++    executor_.dispatch(
++        [this] {
++          while (clock_type::now() < expiry_) {
++            std::this_thread::sleep_for(traits_type::to_wait_duration(expiry_));
++          }
++        },
++        std::allocator<void>{});
+ 
+     return {};
+   }
++  MY_COMPILER_DIAGNOSTIC_POP()
+ 
+   template <class CompletionToken>
+   auto async_wait(CompletionToken &&token) {
+diff --git a/router/src/harness/tests/CMakeLists.txt b/router/src/harness/tests/CMakeLists.txt
+index 41d99148247..aa08fa1504c 100644
+--- a/router/src/harness/tests/CMakeLists.txt
++++ b/router/src/harness/tests/CMakeLists.txt
+@@ -103,7 +103,6 @@ ENDFOREACH()
+ SET(TESTS
+   test_net_ts_buffer.cc
+   test_net_ts_executor.cc
+-  test_net_ts_impl_callstack.cc
+   test_net_ts_impl_file.cc
+   test_net_ts_impl_io_service_base.cc
+   test_net_ts_impl_kqueue_io_service.cc
+diff --git a/router/src/harness/tests/test_net_ts_impl_callstack.cc b/router/src/harness/tests/test_net_ts_impl_callstack.cc
+deleted file mode 100644
+index d813b5ef30d..00000000000
+--- a/router/src/harness/tests/test_net_ts_impl_callstack.cc
++++ /dev/null
+@@ -1,103 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "mysql/harness/net_ts/impl/callstack.h"
+-
+-#include <gmock/gmock.h>
+-#include <gtest/gtest.h>
+-
+-using namespace net::impl;  // Callstack
+-
+-struct Executor {
+-  template <class Func>
+-  void run(Func f) {
+-    // add run() to the callstack of this thread
+-    Callstack<Executor>::Context callstack(this);
+-    f();
+-  }
+-};
+-
+-// @test if callstack can detect if a func() was called in this threads executor
+-TEST(NetTS_impl_callstack, contains) {
+-  Executor executor;
+-  SCOPED_TRACE("// run check outside the executor");
+-  ASSERT_FALSE(Callstack<Executor>::contains(&executor));
+-
+-  SCOPED_TRACE("// run check inside the executor");
+-  executor.run(
+-      [&executor] { ASSERT_TRUE(Callstack<Executor>::contains(&executor)); });
+-}
+-
+-// @test if callstack can handle complex types like DebugInfo
+-TEST(NetTS_impl_callstack, debug_info) {
+-  // lots of ::testing in this test, let's simplify
+-  using namespace ::testing;
+-
+-  // capture line number and function-name
+-  struct DebugInfo {
+-    int line;
+-    const char *func;
+-
+-    DebugInfo(int line, const char *func) : line(line), func(func) {}
+-  };
+-
+-  SCOPED_TRACE("// create an first stackframe");
+-  DebugInfo dbg_info(__LINE__, __func__);
+-  // add debuginfo to the callstack
+-  Callstack<DebugInfo>::Context dbg_ctx(&dbg_info);
+-
+-  // check debuginfo is on the callstack
+-  ASSERT_THAT(
+-      Callstack<DebugInfo>(),
+-      ElementsAre(Property("key", &Callstack<DebugInfo>::Context::key,
+-                           Field(&DebugInfo::line, Eq(dbg_info.line)))));
+-
+-  SCOPED_TRACE("// create another stackframe");
+-  [&outer_dbg_info = dbg_info] {
+-    DebugInfo inner_dbg_info(__LINE__, __func__);
+-    Callstack<DebugInfo>::Context dbg_ctx(&inner_dbg_info);
+-
+-    SCOPED_TRACE("// check debuginfo is on the callstack");
+-    // [0] { 78, operator() }
+-    // [1] { 65, TestBody }
+-    ASSERT_THAT(
+-        Callstack<DebugInfo>(),
+-        ElementsAre(
+-            Property("key", &Callstack<DebugInfo>::Context::key,
+-                     Field(&DebugInfo::line, Eq(inner_dbg_info.line))),
+-            Property("key", &Callstack<DebugInfo>::Context::key,
+-                     Field(&DebugInfo::line, Eq(outer_dbg_info.line)))));
+-  }();
+-
+-  SCOPED_TRACE("// 2nd stackframe removes itself again.");
+-  ASSERT_THAT(
+-      Callstack<DebugInfo>(),
+-      ElementsAre(Property("key", &Callstack<DebugInfo>::Context::key,
+-                           Field(&DebugInfo::line, Eq(dbg_info.line)))));
+-}
+-
+-int main(int argc, char *argv[]) {
+-  ::testing::InitGoogleTest(&argc, argv);
+-  return RUN_ALL_TESTS();
+-}
+-- 
+2.37.2
+

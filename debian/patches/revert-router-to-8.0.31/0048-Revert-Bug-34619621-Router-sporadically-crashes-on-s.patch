@@ -1,0 +1,163 @@
+From e1bac0bc6588c04b967ee3a2f70646d828d48874 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:11:21 -0500
+Subject: [PATCH 48/86] Revert "Bug#34619621 Router sporadically crashes on
+ shutdown if client hit max_connect_errors limit."
+
+This reverts commit 3f8cfb8f4058ef81549bcce579d8e87c646734bd.
+---
+ .../include/mysql/harness/net_ts/io_context.h | 36 ---------
+ .../harness/tests/test_net_ts_io_context.cc   | 76 -------------------
+ 2 files changed, 112 deletions(-)
+
+diff --git a/router/src/harness/include/mysql/harness/net_ts/io_context.h b/router/src/harness/include/mysql/harness/net_ts/io_context.h
+index 96e3bc060ef..a7362b24ed1 100644
+--- a/router/src/harness/include/mysql/harness/net_ts/io_context.h
++++ b/router/src/harness/include/mysql/harness/net_ts/io_context.h
+@@ -75,17 +75,6 @@ class io_context : public execution_context {
+         io_service_open_res_{io_service_->open()} {}
+ 
+   explicit io_context(int /* concurrency_hint */) : io_context() {}
+-
+-  ~io_context() {
+-    active_ops_.release_all();
+-    cancelled_ops_.clear();
+-    // Make sure the services are destroyed before our internal fields. The
+-    // services own the timers that can indirectly call our methods when
+-    // destructed. See UT NetTS_io_context.pending_timer_on_destroy for an
+-    // example.
+-    destroy();
+-  }
+-
+   io_context(const io_context &) = delete;
+   io_context &operator=(const io_context &) = delete;
+ 
+@@ -409,31 +398,6 @@ class io_context : public execution_context {
+       return extract_first(fd, [](auto const &) { return true; });
+     }
+ 
+-    void release_all() {
+-      // We expect that this method is called before AsyncOps destructor, to
+-      // make sure that ops_ map is empty when the destructor executes. If the
+-      // ops_ is not empty when destructed, the destructor of its element can
+-      // trigger a method that will try to access that map (that is destructed).
+-      // Example: we have an AsyncOp that captures some Socket object with a
+-      // smart pointer. When the destructor of this AsyncOp is called, it can
+-      // also call the destructor of that Socket, which in turn will call
+-      // socket.close(), causing the Socket to unregister its operations in
+-      // its respective io_context object which is us (calls extract_first()).
+-      std::list<element_type> ops_to_delete;
+-      {
+-        std::lock_guard<std::mutex> lk(mtx_);
+-        for (auto &fd_ops : ops_) {
+-          for (auto &fd_op : fd_ops.second) {
+-            ops_to_delete.push_back(std::move(fd_op));
+-          }
+-        }
+-        ops_.clear();
+-        // It is important that we release the mtx_ here before the
+-        // ops_to_delete go out of scope and are deleted. AsyncOp destructor can
+-        // indirectly call extract_first which would lead to a deadlock.
+-      }
+-    }
+-
+    private:
+     template <class Pred>
+     element_type extract_first(native_handle_type fd, Pred &&pred) {
+diff --git a/router/src/harness/tests/test_net_ts_io_context.cc b/router/src/harness/tests/test_net_ts_io_context.cc
+index 0b18f9ed933..ffdb73aad95 100644
+--- a/router/src/harness/tests/test_net_ts_io_context.cc
++++ b/router/src/harness/tests/test_net_ts_io_context.cc
+@@ -30,7 +30,6 @@
+ #include <memory>
+ 
+ #include "mysql/harness/net_ts/executor.h"
+-#include "mysql/harness/net_ts/internet.h"
+ #include "mysql/harness/net_ts/timer.h"
+ #include "mysql/harness/stdx/expected.h"
+ #include "mysql/harness/stdx/expected_ostream.h"
+@@ -605,81 +604,6 @@ TEST(NetTS_io_context, executor_defer_move_only_lambda) {
+   ASSERT_EQ(called, 1);
+ }
+ 
+-/**
+- * test that io_context is destructed with no issues when there are still async
+- * operations pending at the time of destruction
+- */
+-TEST(NetTS_io_context, pending_async_ops_on_destroy) {
+-  net::io_context io_ctx;
+-  {
+-    auto sock{std::make_shared<net::ip::tcp::socket>(io_ctx)};
+-    ASSERT_TRUE(sock->open(net::ip::tcp::v4()));
+-    ASSERT_TRUE(sock->is_open());
+-
+-    sock->async_wait(net::socket_base::wait_read,
+-                     [sock](auto /*ec*/) { sock->close(); });
+-
+-    // Here the sock goes out of scope so the io_context is the only owner of
+-    // socket object - which means it will destroy it upon its own destruction.
+-  }
+-
+-  // The io_context is destroyed here when goes out of scope. The test idea is
+-  // to make sure it does not lead to a crash or deadlock.
+-}
+-
+-/**
+- * test that io_context is destructed with no issues when there are still
+- * cancelled operations pending at the time of destruction
+- */
+-TEST(NetTS_io_context, pending_cancelled_ops_on_destroy) {
+-  net::io_context io_ctx;
+-  {
+-    auto sock{std::make_shared<net::ip::tcp::socket>(io_ctx)};
+-    ASSERT_TRUE(sock->open(net::ip::tcp::v4()));
+-    ASSERT_TRUE(sock->is_open());
+-
+-    sock->async_wait(net::socket_base::wait_read,
+-                     [sock](auto /*ec*/) { sock->close(); });
+-
+-    sock->cancel();
+-    // Here the sock goes out of scope so the io_context is the only owner of
+-    // socket object - which means it will destroy it upon its own destruction.
+-  }
+-
+-  // The io_context is destroyed here when goes out of scope. The test idea is
+-  // to make sure it does not lead to a crash or deadlock.
+-}
+-
+-/**
+- * test that io_context is destructed with no issues when there are still
+- * timers pending at the time of destruction
+- */
+-TEST(NetTS_io_context, pending_timer_on_destroy) {
+-  net::io_context io_ctx;
+-
+-  using namespace std::chrono_literals;
+-
+-  net::steady_timer t(io_ctx);
+-
+-  {
+-    auto sock{std::make_shared<net::ip::tcp::socket>(io_ctx)};
+-    ASSERT_TRUE(sock->open(net::ip::tcp::v4()));
+-    ASSERT_TRUE(sock->is_open());
+-
+-    t.expires_after(1s);
+-
+-    t.async_wait([sock](std::error_code ec) {
+-      if (ec == std::errc::operation_canceled) {
+-        return;
+-      }
+-      sock->close();
+-    });
+-  }
+-
+-  // The io_context is destroyed here when goes out of scope. The test idea is
+-  // to make sure it does not lead to a crash or deadlock.
+-}
+-
+ // net::is_executor_v<> chokes with solaris-ld on
+ //
+ //   test_net_ts_executor.cc.o: symbol
+-- 
+2.37.2
+

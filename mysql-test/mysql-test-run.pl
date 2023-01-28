@@ -642,6 +642,18 @@ sub main {
                               template_path => "include/default_my.cnf",);
     unshift(@$tests, $tinfo);
   }
+  my $secondary_engine_suite = 0;
+  if (defined $::secondary_engine and $secondary_engine_support) {
+    foreach(@$tests) {
+      if ($_->{name} =~ /^$::secondary_engine/) {
+        $secondary_engine_suite = 1;
+        last;
+      }
+    }
+  }
+  if (!$secondary_engine_suite) {
+    $secondary_engine_support = 0;
+  }
 
   my $num_tests = @$tests;
   if ($num_tests == 0) {
@@ -807,8 +819,8 @@ sub main {
 
   if (@$completed != $num_tests) {
     # Not all tests completed, failure
-    mtr_report();
-    mtr_report("Only ", int(@$completed), " of $num_tests completed.");
+    mtr_print_line();
+    mtr_report(int(@$completed), " of $num_tests test(s) completed.");
     foreach (@tests_list) {
       $_->{key} = "$_" unless defined $_->{key};
     }
@@ -820,10 +832,15 @@ sub main {
       }
     }
     if (int(@not_completed) <= 100) {
-      mtr_error("Not all tests completed:", join(" ", @not_completed));
+      mtr_report("Not all tests completed:", join(" ", @not_completed));
     } else {
-      mtr_error("Not all tests completed:", join(" ", @not_completed[0...49]), "... and", int(@not_completed)-50, "more");
+      mtr_report("Not all tests completed:", join(" ", @not_completed[0...49]), "... and", int(@not_completed)-50, "more");
     }
+    mtr_report();
+    if(int(@$completed)) {
+      mtr_report_stats("In completed tests", $completed);
+    }
+    mtr_error("No test(s) completed");
   }
 
   mark_time_used('init');
@@ -2671,9 +2688,7 @@ sub executable_setup () {
   $exe_mysql_migrate_keyring =
     mtr_exe_exists("$path_client_bindir/mysql_migrate_keyring");
   $exe_mysql_keyring_encryption_test =
-    my_find_bin($bindir,
-                [ "runtime_output_directory", "libexec", "sbin", "bin" ],
-                "mysql_keyring_encryption_test");
+    mtr_exe_exists("$path_client_bindir/mysql_keyring_encryption_test");
 
   # For custom OpenSSL builds, look for the my_openssl executable.
   $exe_openssl =
@@ -3146,6 +3161,7 @@ sub environment_setup {
       ndb_show_tables
       ndb_waiter
       ndbxfrm
+      ndb_secretsfile_reader
     );
 
     foreach my $tool ( @ndb_tools)
@@ -3612,7 +3628,11 @@ sub check_ndbcluster_support ($) {
 
   my $ndbcluster_supported = 0;
   if ($mysqld_variables{'ndb-connectstring'}) {
-    $ndbcluster_supported = 1;
+    $exe_ndbd =
+      my_find_bin($bindir,
+                  [ "runtime_output_directory", "libexec", "sbin", "bin" ],
+                  "ndbd", NOT_REQUIRED);
+    $ndbcluster_supported = $exe_ndbd ? 1 : 0;
   }
 
   if ($opt_skip_ndbcluster && $opt_include_ndbcluster) {
@@ -6223,6 +6243,11 @@ sub mysqld_arguments ($$$) {
     # Turn on logging to file
     mtr_add_arg($args, "--log-output=file");
   }
+
+  # Force this initial explain_format value, so that tests don't fail with
+  # --hypergraph due to implicit conversion from TRADITIONAL to TREE. Check the
+  # definition of enum Explain_format_type for more details.
+  mtr_add_arg($args, "--explain-format=TRADITIONAL_STRICT");
 
   # Indicate to mysqld it will be debugged in debugger
   if ($glob_debugger) {

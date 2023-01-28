@@ -36,14 +36,14 @@
 
 namespace mysql_harness {
 
-/** Exception that gets thrown when the configuarion option is missing
+/** Exception that gets thrown when the configuration option is missing
  */
 class option_not_present : public std::invalid_argument {
  public:
   using std::invalid_argument::invalid_argument;
 };
 
-/** Exception that gets thrown when the configuarion option is present
+/** Exception that gets thrown when the configuration option is present
  *  but it is empty value
  */
 class option_empty : public std::invalid_argument {
@@ -60,6 +60,14 @@ class option_empty : public std::invalid_argument {
  */
 class HARNESS_EXPORT BasePluginConfig {
  public:
+  BasePluginConfig() = default;
+
+  BasePluginConfig(const BasePluginConfig &) = default;
+  BasePluginConfig(BasePluginConfig &&) = default;
+
+  BasePluginConfig &operator=(const BasePluginConfig &) = default;
+  BasePluginConfig &operator=(BasePluginConfig &&) = default;
+
   /**
    * destructor
    */

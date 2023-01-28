@@ -1,0 +1,166 @@
+From 701ce956839b4800494821ffbf6dc7e4da9b0d1a Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:02:40 -0500
+Subject: [PATCH 07/86] Revert "Bug#34833817 integration tests fail on
+ solaris/macos/windows"
+
+This reverts commit 8b378f8df8b51c6dd35fb85bac8f723a89c2e8cf.
+---
+ router/tests/helpers/procs.h                  |  4 ++-
+ .../test_routing_sharing_constrained_pools.cc | 28 +++++++------------
+ .../test_routing_sharing_restart.cc           | 19 ++-----------
+ 3 files changed, 15 insertions(+), 36 deletions(-)
+
+diff --git a/router/tests/helpers/procs.h b/router/tests/helpers/procs.h
+index e656c2cf51a..f87130fa55f 100644
+--- a/router/tests/helpers/procs.h
++++ b/router/tests/helpers/procs.h
+@@ -53,7 +53,9 @@ class Procs : public ProcessManager {
+     shutdown_all();
+     ensure_clean_exit();
+ 
+-    if (dump_logs_) dump_all();
++    if (::testing::Test::HasFatalFailure() || dump_logs_) {
++      dump_all();
++    }
+ 
+     // it will call shutdown again ...
+     ProcessManager::clear();
+diff --git a/router/tests/integration/test_routing_sharing_constrained_pools.cc b/router/tests/integration/test_routing_sharing_constrained_pools.cc
+index 98f99f300d9..a7b0a7db8ed 100644
+--- a/router/tests/integration/test_routing_sharing_constrained_pools.cc
++++ b/router/tests/integration/test_routing_sharing_constrained_pools.cc
+@@ -504,6 +504,8 @@ class SharedServer {
+   void spawn_server_with_datadir(
+       const std::string &datadir,
+       const std::vector<std::string> &extra_args = {}) {
++    SCOPED_TRACE("// start server");
++
+     // parent is either:
+     //
+     // - runtime_output_directory/ or
+@@ -568,9 +570,6 @@ class SharedServer {
+     // remember the extra args for "restart_server()"
+     started_args_ = extra_args;
+ 
+-    SCOPED_TRACE("// starting mysqld from " + bindir.str() + " with datadir " +
+-                 datadir);
+-
+     auto &proc =
+         process_manager()
+             .spawner(bindir.join("mysqld").str())
+@@ -580,16 +579,12 @@ class SharedServer {
+ #endif
+             .spawn(args);
+     proc.set_logging_path(datadir, log_file_name);
+-    if (!proc.wait_for_sync_point_result()) {
+-      process_manager().dump_logs();
+-      mysqld_failed_to_start_ = true;
+-    }
++    if (!proc.wait_for_sync_point_result()) mysqld_failed_to_start_ = true;
+ 
+ #ifdef _WIN32
+     // on windows, wait until port is ready as there is no notify-socket.
+     if (!(wait_for_port_ready(server_port_, 10s) &&
+           wait_for_port_ready(server_mysqlx_port_, 10s))) {
+-      process_manager().dump_logs();
+       mysqld_failed_to_start_ = true;
+     }
+ #endif
+@@ -2192,17 +2187,14 @@ TEST_P(ShareConnectionTinyPoolOneServerTest,
+     GTEST_SKIP() << "skipped as RUN_SLOW_TESTS environment-variable is not set";
+   }
+ 
+-  SCOPED_TRACE("// starting to replica server");
+-  SharedServer replica_server(test_env->port_pool());
++  SCOPED_TRACE("// connecting to server");
++
++  SharedServer replica_server(port_pool_);
+ 
+-  SCOPED_TRACE("// .. preparing datadir");
+   replica_server.prepare_datadir();
+-  SCOPED_TRACE("// .. spawning replica");
+   replica_server.spawn_server(
+       {"--report-host=some_funky_host", "--server-id=2"});
+-  ASSERT_FALSE(replica_server.mysqld_failed_to_start());
+ 
+-  SCOPED_TRACE("// connecting to server");
+   auto replica_res = replica_server.admin_cli();
+   ASSERT_NO_ERROR(replica_res);
+ 
+@@ -2232,7 +2224,7 @@ PASSWORD = ""
+   using clock_type = std::chrono::steady_clock;
+   for (auto cur = clock_type::now(), end = cur + 10s;;
+        cur = clock_type::now()) {
+-    ASSERT_LT(cur, end) << "waited 10sec for replica to register.";
++    ASSERT_LT(cur, end);
+ 
+     auto cmd_res = query_one_result(replica, R"(SELECT
+   r.service_state,
+@@ -2302,12 +2294,12 @@ TEST_P(ShareConnectionTinyPoolOneServerTest, classic_protocol_clone) {
+     GTEST_SKIP() << "skipped as RUN_SLOW_TESTS environment-variable is not set";
+   }
+ 
+-  SCOPED_TRACE("// starting clone recipient");
+-  SharedServer recipient_server(test_env->port_pool());
++  SCOPED_TRACE("// connecting to server");
++
++  SharedServer recipient_server(port_pool_);
+ 
+   recipient_server.prepare_datadir();
+   recipient_server.spawn_server();
+-  ASSERT_FALSE(recipient_server.mysqld_failed_to_start());
+ 
+   SCOPED_TRACE("// connection to the recipient server directly");
+   auto recipient_res = recipient_server.admin_cli();
+diff --git a/router/tests/integration/test_routing_sharing_restart.cc b/router/tests/integration/test_routing_sharing_restart.cc
+index 88e937bf805..b2c3232d819 100644
+--- a/router/tests/integration/test_routing_sharing_restart.cc
++++ b/router/tests/integration/test_routing_sharing_restart.cc
+@@ -1225,16 +1225,10 @@ class ShareConnectionTestWithRestartedServer
+   void TearDown() override {
+     for (auto &inter : intermediate_routers_) {
+       if (!inter->is_running()) {
+-        if (::testing::Test::HasFatalFailure()) {
+-          inter->process_manager().dump_logs();
+-        }
+         inter->process_manager().clear();
+       }
+     }
+ 
+-    if (::testing::Test::HasFatalFailure()) {
+-      shared_router_->process_manager().dump_logs();
+-    }
+     shared_router_->process_manager().clear();
+   }
+ 
+@@ -1309,15 +1303,7 @@ class ShareConnectionTestTemp
+         test_env->port_pool(), shared_servers(), kMaxPoolSize, split_routes);
+   }
+ 
+-  static void TearDownTestSuite() {
+-    TestWithSharedRouter::TearDownTestSuite();
+-
+-    if (::testing::Test::HasFatalFailure()) {
+-      for (const auto &s : shared_servers()) {
+-        s->process_manager().dump_logs();
+-      }
+-    }
+-  }
++  static void TearDownTestSuite() { TestWithSharedRouter::TearDownTestSuite(); }
+ 
+   static std::array<SharedServer *, kNumServers> shared_servers() {
+     std::array<SharedServer *, kNumServers> o;
+@@ -1459,8 +1445,7 @@ TEST_P(ShareConnectionTestWithRestartedServer,
+       if (!recv_res) {
+         // on windows the connection may be closed before the error-msg is sent.
+         ASSERT_THAT(recv_res.error(),
+-                    AnyOf(make_error_condition(std::errc::connection_aborted),
+-                          make_error_condition(std::errc::connection_reset)));
++                    AnyOf(make_error_condition(std::errc::connection_aborted)));
+       } else {
+         buf.resize(*recv_res);
+ 
+-- 
+2.37.2
+

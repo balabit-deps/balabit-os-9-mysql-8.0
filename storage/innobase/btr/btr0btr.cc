@@ -1551,7 +1551,7 @@ rec_t *btr_root_raise_and_insert(
       lock_prdt_rec_move(new_block, root_block);
     }
 
-    btr_search_move_or_delete_hash_entries(new_block, root_block, index);
+    btr_search_update_hash_on_move(new_block, root_block, index);
   }
 
   /* If this is a pessimistic insert which is actually done to
@@ -2056,6 +2056,7 @@ static void btr_attach_half_pages(
 
   /* for consistency, both blocks should be locked, before change */
   if (prev_page_no != FIL_NULL && direction == FSP_DOWN) {
+    DEBUG_SYNC_C("btr_attach_half_pages_prev_block");
     prev_block = btr_block_get(page_id_t(space, prev_page_no), block->page.size,
                                RW_X_LATCH, UT_LOCATION_HERE, index, mtr);
   }
@@ -2506,7 +2507,7 @@ func_start:
                                  new_page + PAGE_NEW_INFIMUM);
       }
 
-      btr_search_move_or_delete_hash_entries(new_block, block, cursor->index);
+      btr_search_update_hash_on_move(new_block, block, cursor->index);
 
       /* Delete the records from the source page. */
 
@@ -2547,7 +2548,7 @@ func_start:
 
       ut_ad(!dict_index_is_spatial(index));
 
-      btr_search_move_or_delete_hash_entries(new_block, block, cursor->index);
+      btr_search_update_hash_on_move(new_block, block, cursor->index);
 
       /* Delete the records from the source page. */
 
@@ -2924,7 +2925,7 @@ static buf_block_t *btr_lift_page_up(
       lock_prdt_rec_move(father_block, block);
     }
 
-    btr_search_move_or_delete_hash_entries(father_block, block, index);
+    btr_search_update_hash_on_move(father_block, block, index);
   }
 
   if (!dict_table_is_locking_disabled(index->table)) {

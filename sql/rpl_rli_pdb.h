@@ -912,13 +912,17 @@ class Slave_worker : public Relay_log_info {
       MY_ATTRIBUTE((format(printf, 4, 0)));
 
  private:
-  ulong gaq_index;  // GAQ index of the current assignment
-  ulonglong
-      master_log_pos;  // event's cached log_pos for possible error report
+  ulong gaq_index;           // GAQ index of the current assignment
+  ulonglong master_log_pos;  // event's cached log_pos for possible error report
   void end_info();
   bool read_info(Rpl_info_handler *from) override;
   bool write_info(Rpl_info_handler *to) override;
   std::atomic<bool> m_commit_order_deadlock;
+
+  /// This flag indicates whether positions were already modified during the
+  /// event processing, if yes, positions are not updated in the
+  /// slave_worker_ends_group function
+  bool m_flag_positions_committed = false;
 
   Slave_worker &operator=(const Slave_worker &info);
   Slave_worker(const Slave_worker &info);

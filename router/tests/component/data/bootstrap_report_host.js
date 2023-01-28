@@ -2,7 +2,7 @@ var common_stmts = require("common_statements");
 
 var options = {
   cluster_type: "gr",
-  innodb_cluster_name: "my-cluster",
+  innodb_cluster_name: "mycluster",
   innodb_cluster_instances:
       [["localhost", 5500], ["localhost", 5510], ["localhost", 5520]],
   bootstrap_report_host_pattern: "host.foo.bar",
@@ -26,6 +26,7 @@ var common_responses = common_stmts.prepare_statement_responses(
       "router_select_cluster_instance_addresses_v2",
       "router_start_transaction",
       "router_commit",
+      "router_clusterset_present",
     ],
     options);
 

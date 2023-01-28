@@ -37,6 +37,8 @@ MYSQL_ADD_EXECUTABLE(signal_me
   SKIP_INSTALL
   )
 
+ADD_SUBDIRECTORY(rest_signal)
+
 ADD_DEFINITIONS(-DSSL_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/mysql-test/std_data/")
 ADD_DEFINITIONS(-DCMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 FOREACH(test_file
@@ -66,10 +68,12 @@ FOREACH(test_file
     test_rest_routing.cc
     test_rest_connection_pool.cc
     test_router_configuration_errors.cc
+    test_router_stacktrace.cc
     test_routing.cc
     test_routing_connection.cc
     test_routing_connection_errors.cc
     test_routing_strategy.cc
+    test_routing_sharing.cc
     test_sd_notify.cc
     test_shutdown.cc
     test_state_file.cc
@@ -77,6 +81,7 @@ FOREACH(test_file
     test_metadata_http_auth_backend.cc
     test_socket_close.cc
     test_stacktrace.cc
+    test_destination_status.cc
     )
 add_test_file(${CMAKE_CURRENT_SOURCE_DIR}/${test_file}
   MODULE "component"

@@ -1,0 +1,27 @@
+From 231083ac2923e3298f3b01d5b3a235d335132277 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:05:05 -0500
+Subject: [PATCH 26/86] Revert "Bug#34787879 linux-epoll issues unnecessary
+ epoll_ctl(MOD)"
+
+This reverts commit a351cb1a1f88d0bd456e345e1ef4a7659f5bc988.
+---
+ .../include/mysql/harness/net_ts/impl/linux_epoll_io_service.h  | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/router/src/harness/include/mysql/harness/net_ts/impl/linux_epoll_io_service.h b/router/src/harness/include/mysql/harness/net_ts/impl/linux_epoll_io_service.h
+index ddfb0b8a0c9..053a325f866 100644
+--- a/router/src/harness/include/mysql/harness/net_ts/impl/linux_epoll_io_service.h
++++ b/router/src/harness/include/mysql/harness/net_ts/impl/linux_epoll_io_service.h
+@@ -339,7 +339,7 @@ class linux_epoll_io_service : public IoServiceBase {
+       // update the fd-interest
+       it->second &= ~revent;
+ 
+-      if ((it->second & ev_mask) != 0) {
++      if (it->second != 0) {
+         // if a one shot event with multiple waiting events fired for one of the
+         // events, it removes all interests for the fd.
+         //
+-- 
+2.37.2
+

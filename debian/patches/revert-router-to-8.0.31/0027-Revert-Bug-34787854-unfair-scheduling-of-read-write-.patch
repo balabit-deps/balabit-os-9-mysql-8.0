@@ -1,0 +1,96 @@
+From 46e4f4125f318b1d800eaceb033f15614547c68b Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:05:10 -0500
+Subject: [PATCH 27/86] Revert "Bug#34787854 unfair scheduling of read/write on
+ slow-machines"
+
+This reverts commit 2cf7c62106e28d09253e15012c58431144c4da79.
+---
+ .../src/routing/src/basic_protocol_splicer.h  | 66 +++++++++++++++++--
+ 1 file changed, 62 insertions(+), 4 deletions(-)
+
+diff --git a/router/src/routing/src/basic_protocol_splicer.h b/router/src/routing/src/basic_protocol_splicer.h
+index a16bdf74145..1bb2c1a0b4a 100644
+--- a/router/src/routing/src/basic_protocol_splicer.h
++++ b/router/src/routing/src/basic_protocol_splicer.h
+@@ -157,15 +157,73 @@ class BasicConnection : public ConnectionBase {
+   void async_recv(recv_buffer_type &buf,
+                   std::function<void(std::error_code ec, size_t transferred)>
+                       completion) override {
+-    net::async_read(sock_, net::dynamic_buffer(buf), net::transfer_at_least(1),
+-                    std::move(completion));
++    if (sock_.native_non_blocking()) {
++      auto read_res =
++          net::read(sock_, net::dynamic_buffer(buf), net::transfer_at_least(1));
++
++      if (!read_res) {
++        auto ec = read_res.error();
++
++        if (ec == make_error_condition(std::errc::operation_would_block)) {
++          net::async_read(sock_, net::dynamic_buffer(buf),
++                          net::transfer_at_least(1), std::move(completion));
++          return;
++        } else {
++          net::post(sock_.get_executor().context(),
++                    [completion = std::move(completion), ec]() {
++                      completion(ec, 0);
++                    });
++          return;
++        }
++      } else {
++        net::post(sock_.get_executor().context(),
++                  [completion = std::move(completion),
++                   transferred = read_res.value()]() {
++                    completion(std::error_code{}, transferred);
++                  });
++        return;
++      }
++
++    } else {
++      net::async_read(sock_, net::dynamic_buffer(buf),
++                      net::transfer_at_least(1), std::move(completion));
++    }
+   }
+ 
+   void async_send(recv_buffer_type &buf,
+                   std::function<void(std::error_code ec, size_t transferred)>
+                       completion) override {
+-    net::async_write(sock_, net::dynamic_buffer(buf), net::transfer_at_least(1),
+-                     std::move(completion));
++    if (sock_.native_non_blocking()) {
++      auto write_res = net::write(sock_, net::dynamic_buffer(buf),
++                                  net::transfer_at_least(1));
++
++      if (!write_res) {
++        auto ec = write_res.error();
++
++        if (ec == make_error_condition(std::errc::operation_would_block)) {
++          net::async_write(sock_, net::dynamic_buffer(buf),
++                           net::transfer_at_least(1), std::move(completion));
++          return;
++        } else {
++          net::post(sock_.get_executor().context(),
++                    [completion = std::move(completion), ec]() {
++                      completion(ec, 0);
++                    });
++          return;
++        }
++      } else {
++        net::post(sock_.get_executor().context(),
++                  [completion = std::move(completion),
++                   transferred = write_res.value()]() {
++                    completion(std::error_code{}, transferred);
++                  });
++        return;
++      }
++
++    } else {
++      net::async_write(sock_, net::dynamic_buffer(buf),
++                       net::transfer_at_least(1), std::move(completion));
++    }
+   }
+ 
+   void async_wait_send(
+-- 
+2.37.2
+

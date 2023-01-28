@@ -208,8 +208,21 @@
   - Bug #33787300 Rename utf8_xxx collations to utf8mb3_xxx
     This patch renames utf8_bin to utf8mb3_bin
     This patch renames utf8_general_ci
+
+  80031:
+
+  - WL#14432 Session memory limits in performance schema
+    Modified column PROPERTIES in table setup_instruments
+    Added column FLAGS in table setup_instruments
+
+  80032:
+
+  - WL#15419: Make the replica_generate_invisible_primary_key option settable
+    per channel
+    Modified column REQUIRE_TABLE_PRIMARY_KEY_CHECK in table
+    replication_applier_configuration
 */
 
-static const uint PFS_DD_VERSION = 80030;
+static const uint PFS_DD_VERSION = 80032;
 
 #endif /* PFS_DD_VERSION_H */

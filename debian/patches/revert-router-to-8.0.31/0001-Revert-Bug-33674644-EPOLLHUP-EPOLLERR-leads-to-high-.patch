@@ -1,0 +1,34 @@
+From f3bc542687d8ba93a67555d66a1a87e63b03f50d Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:02:03 -0500
+Subject: [PATCH 01/86] Revert "Bug#33674644 EPOLLHUP|EPOLLERR leads to high
+ CPU usage [3/3] - postfix"
+
+This reverts commit b30669371c9f9a04dc7b3a50f59d6b504cd9ddba.
+---
+ router/src/harness/tests/linux_timestamping.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/router/src/harness/tests/linux_timestamping.cc b/router/src/harness/tests/linux_timestamping.cc
+index aaf39422c19..78c2ffa8156 100644
+--- a/router/src/harness/tests/linux_timestamping.cc
++++ b/router/src/harness/tests/linux_timestamping.cc
+@@ -732,11 +732,11 @@ class Stats : public ControlMsgBase<SOL_SOCKET, SCM_TIMESTAMPING_OPT_STATS> {
+ 
+     reference_type operator*() {
+       const auto attr = reinterpret_cast<const nlattr *>(cur_);
+-      const auto attr_len = attr->nla_len;
+-      const auto attr_type = attr->nla_type;
++      size_t attr_len = attr->nla_len;
++      size_t attr_type = attr->nla_type;
+ 
+-      const auto payload_len = attr_len - NLA_HDRLEN;
+-      const auto payload = cur_ + NLA_HDRLEN;
++      auto payload_len = attr_len - NLA_HDRLEN;
++      auto payload = cur_ + NLA_HDRLEN;
+ 
+       return {attr_type, {payload, payload_len}};
+     }
+-- 
+2.37.2
+

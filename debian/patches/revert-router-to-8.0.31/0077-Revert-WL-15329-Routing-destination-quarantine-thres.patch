@@ -1,0 +1,2292 @@
+From 5223ed96bfbe7b6667cbd358d62053f2fa8e5f01 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:21:22 -0500
+Subject: [PATCH 77/86] Revert "WL#15329 Routing destination quarantine
+ threshold should be configurable"
+
+This reverts commit 1570bb89c96768dc0be517542cbad8b30adb4408.
+---
+ .../mysql-router-packagesource.install.in     |   2 -
+ packaging/rpm-fedora/mysql.spec.in            |   1 -
+ packaging/rpm-oel/mysql.spec.in               |   1 -
+ packaging/rpm-sles/mysql.spec.in              |   1 -
+ router/src/CMakeLists.txt                     |   1 -
+ router/src/destination_status/CMakeLists.txt  |  23 --
+ .../destination_status_component.h            | 156 ---------
+ .../mysqlrouter/destination_status_types.h    |  60 ----
+ .../supported_destination_status_options.h    |  34 --
+ .../src/destination_status/src/CMakeLists.txt |  86 -----
+ .../src/destination_status_component.cc       |  86 -----
+ .../src/destination_status_plugin.cc          | 146 ---------
+ .../plugin_info/tests/test_plugin_info_app.cc |   3 +-
+ .../routing/include/mysqlrouter/destination.h |   2 -
+ .../src/routing/include/mysqlrouter/routing.h |   7 +
+ ...routing_common_unreachable_destinations.h} |  71 ++--
+ .../include/mysqlrouter/routing_component.h   |   7 +-
+ .../mysqlrouter/supported_routing_options.h   |   6 +-
+ router/src/routing/src/CMakeLists.txt         |   2 +-
+ router/src/routing/src/classic_connection.cc  |  12 +-
+ router/src/routing/src/connection.cc          |   5 -
+ router/src/routing/src/connection.h           |   5 -
+ router/src/routing/src/destination.h          |  11 +-
+ router/src/routing/src/plugin_config.cc       |  16 +-
+ router/src/routing/src/plugin_config.h        |   2 +
+ ...outing_common_unreachable_destinations.cc} | 113 +++----
+ router/src/routing/src/routing_component.cc   |  58 +---
+ router/src/routing/src/routing_plugin.cc      |   7 +-
+ .../routing/src/shared_quarantine_handler.h   |   8 +-
+ router/tests/component/CMakeLists.txt         |   1 -
+ .../component/test_bootstrap_clusterset.cc    |   2 +
+ router/tests/component/test_clusterset.cc     |   4 +
+ .../component/test_destination_status.cc      | 125 -------
+ .../test_router_configuration_errors.cc       |  44 +++
+ .../tests/component/test_routing_strategy.cc  | 306 +++++++-----------
+ .../helpers/router_component_clusterset.h     |   2 +
+ 36 files changed, 300 insertions(+), 1116 deletions(-)
+ delete mode 100644 router/src/destination_status/CMakeLists.txt
+ delete mode 100644 router/src/destination_status/include/mysqlrouter/destination_status_component.h
+ delete mode 100644 router/src/destination_status/include/mysqlrouter/destination_status_types.h
+ delete mode 100644 router/src/destination_status/include/mysqlrouter/supported_destination_status_options.h
+ delete mode 100644 router/src/destination_status/src/CMakeLists.txt
+ delete mode 100644 router/src/destination_status/src/destination_status_component.cc
+ delete mode 100644 router/src/destination_status/src/destination_status_plugin.cc
+ rename router/src/{destination_status/src/unreachable_destinations_quarantine.h => routing/include/mysqlrouter/routing_common_unreachable_destinations.h} (82%)
+ rename router/src/{destination_status/src/unreachable_destinations_quarantine.cc => routing/src/routing_common_unreachable_destinations.cc} (81%)
+ delete mode 100644 router/tests/component/test_destination_status.cc
+
+diff --git a/packaging/deb-in/mysql-router-packagesource.install.in b/packaging/deb-in/mysql-router-packagesource.install.in
+index 4fa49251589..a102382bec6 100644
+--- a/packaging/deb-in/mysql-router-packagesource.install.in
++++ b/packaging/deb-in/mysql-router-packagesource.install.in
+@@ -25,7 +25,6 @@ usr/bin/mysqlrouter_keyring
+ usr/bin/mysqlrouter_plugin_info
+ usr/bin/mysqlrouter_passwd
+ usr/lib/mysqlrouter/plugin/connection_pool.so
+-usr/lib/mysqlrouter/plugin/destination_status.so
+ usr/lib/mysqlrouter/plugin/http_auth_backend.so
+ usr/lib/mysqlrouter/plugin/http_auth_realm.so
+ usr/lib/mysqlrouter/plugin/http_server.so
+@@ -47,7 +46,6 @@ usr/lib/mysqlrouter/private/libmysqlharness_stdx.so.1
+ usr/lib/mysqlrouter/private/libmysqlharness_tls.so.1
+ usr/lib/mysqlrouter/private/libmysqlrouter.so.1
+ usr/lib/mysqlrouter/private/libmysqlrouter_connection_pool.so.1
+-usr/lib/mysqlrouter/private/libmysqlrouter_destination_status.so.1
+ usr/lib/mysqlrouter/private/libmysqlrouter_http.so.1
+ usr/lib/mysqlrouter/private/libmysqlrouter_http_auth_backend.so.1
+ usr/lib/mysqlrouter/private/libmysqlrouter_http_auth_realm.so.1
+diff --git a/packaging/rpm-fedora/mysql.spec.in b/packaging/rpm-fedora/mysql.spec.in
+index 410ee581895..3bcb0c30916 100644
+--- a/packaging/rpm-fedora/mysql.spec.in
++++ b/packaging/rpm-fedora/mysql.spec.in
+@@ -1211,7 +1211,6 @@ rm -r $(readlink var) var
+ %{_libdir}/mysqlrouter/private/libmysqlharness_tls.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_connection_pool.so.*
+-%{_libdir}/mysqlrouter/private/libmysqlrouter_destination_status.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_backend.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_realm.so.*
+diff --git a/packaging/rpm-oel/mysql.spec.in b/packaging/rpm-oel/mysql.spec.in
+index 57ad4d81bc8..9a4326340da 100644
+--- a/packaging/rpm-oel/mysql.spec.in
++++ b/packaging/rpm-oel/mysql.spec.in
+@@ -1839,7 +1839,6 @@ fi
+ %{_libdir}/mysqlrouter/private/libmysqlharness_tls.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_connection_pool.so.*
+-%{_libdir}/mysqlrouter/private/libmysqlrouter_destination_status.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_backend.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_realm.so.*
+diff --git a/packaging/rpm-sles/mysql.spec.in b/packaging/rpm-sles/mysql.spec.in
+index bad6f4bd385..c27c13aa2de 100644
+--- a/packaging/rpm-sles/mysql.spec.in
++++ b/packaging/rpm-sles/mysql.spec.in
+@@ -1419,7 +1419,6 @@ rm -r $(readlink var) var
+ %{_libdir}/mysqlrouter/private/libmysqlharness_tls.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_connection_pool.so.*
+-%{_libdir}/mysqlrouter/private/libmysqlrouter_destination_status.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_backend.so.*
+ %{_libdir}/mysqlrouter/private/libmysqlrouter_http_auth_realm.so.*
+diff --git a/router/src/CMakeLists.txt b/router/src/CMakeLists.txt
+index dcd5cd4d542..e1005ac5c49 100644
+--- a/router/src/CMakeLists.txt
++++ b/router/src/CMakeLists.txt
+@@ -21,7 +21,6 @@
+ # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ 
+ ADD_SUBDIRECTORY(connection_pool)
+-ADD_SUBDIRECTORY(destination_status)
+ ADD_SUBDIRECTORY(harness)
+ ADD_SUBDIRECTORY(http)
+ ADD_SUBDIRECTORY(io)
+diff --git a/router/src/destination_status/CMakeLists.txt b/router/src/destination_status/CMakeLists.txt
+deleted file mode 100644
+index 363d42147b4..00000000000
+--- a/router/src/destination_status/CMakeLists.txt
++++ /dev/null
+@@ -1,23 +0,0 @@
+-# Copyright (c) 2022, Oracle and/or its affiliates.
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License, version 2.0,
+-# as published by the Free Software Foundation.
+-#
+-# This program is also distributed with certain software (including
+-# but not limited to OpenSSL) that is licensed under separate terms,
+-# as designated in a particular file or component or in included license
+-# documentation.  The authors of MySQL hereby grant you an additional
+-# permission to link the program and your derivative works with the
+-# separately licensed software that they have included with MySQL.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-
+-ADD_SUBDIRECTORY(src)
+diff --git a/router/src/destination_status/include/mysqlrouter/destination_status_component.h b/router/src/destination_status/include/mysqlrouter/destination_status_component.h
+deleted file mode 100644
+index ea729ae1acd..00000000000
+--- a/router/src/destination_status/include/mysqlrouter/destination_status_component.h
++++ /dev/null
+@@ -1,156 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQLROUTER_DESTINATION_STATUS_COMPONENT_INCLUDED
+-#define MYSQLROUTER_DESTINATION_STATUS_COMPONENT_INCLUDED
+-
+-#include <memory>
+-#include <mutex>
+-#include <unordered_map>
+-#include <vector>
+-
+-#include "mysqlrouter/destination_status_export.h"
+-#include "mysqlrouter/destination_status_types.h"
+-
+-#include "tcp_address.h"
+-
+-class UnreachableDestinationsQuarantine;
+-
+-/**
+- * @class DestinationStatusComponent
+- * @brief Shared component representing status of the routing destinations.
+- *
+- */
+-class DESTINATION_STATUS_EXPORT DestinationStatusComponent {
+- public:
+-  /**
+-   * @brief Get the singleton instance object of our class.
+-   */
+-  static DestinationStatusComponent &get_instance();
+-
+-  // disable copy, as we are a single-instance
+-  DestinationStatusComponent(DestinationStatusComponent const &) = delete;
+-  void operator=(DestinationStatusComponent const &) = delete;
+-
+-  // no move either
+-  DestinationStatusComponent(DestinationStatusComponent &&) = delete;
+-  void operator=(DestinationStatusComponent &&) = delete;
+-
+-  ~DestinationStatusComponent();
+-
+-  /**
+-   * @brief Initialize the component with the configured options.
+-   *
+-   * @param quarantine_interval interval after which the quarantined
+-   * destinations are checked for availability
+-   * @param qurantine_threshold number of invalid connect attempts after which
+-   * the destination is added to the quarantine
+-   */
+-  void init(std::chrono::seconds quarantine_interval,
+-            uint32_t qurantine_threshold);
+-
+-  /**
+-   * @brief Register callbacks requied by the quarantine mechanism (start/stop
+-   * acceptor etc.).
+-   *
+-   * @param routing_callbacks object defining the callbacks
+-   */
+-  void register_quarantine_callbacks(
+-      QuarantineRoutingCallbacks &&routing_callbacks);
+-  /**
+-   * @brief Unregister callbacks requied by the quarantine mechanism.
+-   */
+-  void unregister_quarantine_callbacks();
+-
+-  /**
+-   * @brief Register routing instance in the quarantine mechanism.
+-   *
+-   * @param name name of the route
+-   */
+-  void register_route(const std::string &name);
+-
+-  /**
+-   * Register the connection error or success to a given destination.
+-   *
+-   * If registering a success it will set the number of reported errors to a
+-   * given connection to 0.
+-   *
+-   * If registering a failure it will increment the number of reported failed
+-   * connections to the destination. If the number reached the
+-   * quarantine_threshold the destination will be added to the quarantine. If
+-   * the destination candidate is not quarantine yet it will starting the async
+-   * handler for it, otherwise it will just update the referencing plugins list.
+-   *
+-   * @param[in] dest Reported destination address.
+-   * @param[in] success Indicates if the reported connection result is success
+-   * of failure.
+-   *
+-   * @returns true if the destination got added to the quarantine, false
+-   * otherwise
+-   */
+-  bool report_connection_result(const mysql_harness::TCPAddress &dest,
+-                                bool success);
+-
+-  /**
+-   * Query the quarantined destination candidates set and check if the given
+-   * destination candidate is quarantined.
+-   *
+-   * @param[in] dest Destination candidate address.
+-   * @returns true if the destination candidate is quarantined, false otherwise.
+-   */
+-  bool is_destination_quarantined(const mysql_harness::TCPAddress &dest);
+-
+-  /**
+-   * Stop all async operations and clear the quarantine list.
+-   */
+-  void stop_unreachable_destinations_quarantine();
+-
+-  /**
+-   * Refresh the quarantined destination candidates list on metadata refresh.
+-   *
+-   * 1) if the destination candidates list got updated we have to go through the
+-   * quarantined destinations and check if there are still routing plugins that
+-   * references them.
+-   * 2) for each destination returned in the metadata (which is available from
+-   * the md perspective) check if it is still unreachable and should be
+-   * quarantined.
+-   *
+-   * @param[in] instance_name Routing plugin instance name.
+-   * @param[in] nodes_changed_on_md_refresh Information if the destination
+-   *            candidates have been updated for the given routing plugin.
+-   * @param[in] new_destinations List of destination candidates that are
+-   *            available for the given routing plugin after metadata refresh.
+-   */
+-  void refresh_destinations_quarantine(const std::string &instance_name,
+-                                       const bool nodes_changed_on_md_refresh,
+-                                       const AllowedNodes &new_destinations);
+-
+- private:
+-  DestinationStatusComponent();
+-
+-  std::unique_ptr<UnreachableDestinationsQuarantine>
+-      unreachable_destinations_quarantine_;
+-};
+-
+-#endif  // MYSQLROUTER_DESTINATION_STATUS_COMPONENT_INCLUDED
+diff --git a/router/src/destination_status/include/mysqlrouter/destination_status_types.h b/router/src/destination_status/include/mysqlrouter/destination_status_types.h
+deleted file mode 100644
+index eff464032ec..00000000000
+--- a/router/src/destination_status/include/mysqlrouter/destination_status_types.h
++++ /dev/null
+@@ -1,60 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQLROUTER_DESTINATION_STATUS_TYPES_INCLUDED
+-#define MYSQLROUTER_DESTINATION_STATUS_TYPES_INCLUDED
+-
+-#include <memory>
+-#include <vector>
+-
+-#include "tcp_address.h"
+-
+-struct QuarantineRoutingCallbacks {
+-  std::function<std::vector<mysql_harness::TCPAddress>(const std::string &)>
+-      on_get_destinations;
+-  std::function<void(const std::string &)> on_start_acceptors;
+-  std::function<void(const std::string &)> on_stop_acceptors;
+-
+-  void reset() {
+-    on_get_destinations =
+-        [](const std::string &) -> std::vector<mysql_harness::TCPAddress> {
+-      return {};
+-    };
+-
+-    on_start_acceptors = [](const std::string &) -> void {};
+-    on_stop_acceptors = [](const std::string &) -> void {};
+-  }
+-};
+-
+-struct AvailableDestination {
+-  AvailableDestination(mysql_harness::TCPAddress a, std::string i)
+-      : address{std::move(a)}, id{std::move(i)} {}
+-
+-  mysql_harness::TCPAddress address;
+-  std::string id;
+-};
+-
+-using AllowedNodes = std::vector<AvailableDestination>;
+-
+-#endif  // MYSQLROUTER_DESTINATION_STATUS_TYPES_INCLUDED
+diff --git a/router/src/destination_status/include/mysqlrouter/supported_destination_status_options.h b/router/src/destination_status/include/mysqlrouter/supported_destination_status_options.h
+deleted file mode 100644
+index 4eeddfd83d7..00000000000
+--- a/router/src/destination_status/include/mysqlrouter/supported_destination_status_options.h
++++ /dev/null
+@@ -1,34 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQLROUTER_ROUTING_SUPPORTED_DESTINATION_STATUS_OPTIONS_INCLUDED
+-#define MYSQLROUTER_ROUTING_SUPPORTED_DESTINATION_STATUS_OPTIONS_INCLUDED
+-
+-#include <array>
+-
+-static constexpr std::array<const char *, 2>
+-    destination_status_supported_options{"error_quarantine_interval",
+-                                         "error_quarantine_threshold"};
+-
+-#endif /* MYSQLROUTER_ROUTING_SUPPORTED_DESTINATION_STATUS_OPTIONS_INCLUDED */
+diff --git a/router/src/destination_status/src/CMakeLists.txt b/router/src/destination_status/src/CMakeLists.txt
+deleted file mode 100644
+index 3aa47d2e827..00000000000
+--- a/router/src/destination_status/src/CMakeLists.txt
++++ /dev/null
+@@ -1,86 +0,0 @@
+-# Copyright (c) 2022, Oracle and/or its affiliates.
+-#
+-# This program is free software; you can redistribute it and/or modify
+-# it under the terms of the GNU General Public License, version 2.0,
+-# as published by the Free Software Foundation.
+-#
+-# This program is also distributed with certain software (including
+-# but not limited to OpenSSL) that is licensed under separate terms,
+-# as designated in a particular file or component or in included license
+-# documentation.  The authors of MySQL hereby grant you an additional
+-# permission to link the program and your derivative works with the
+-# separately licensed software that they have included with MySQL.
+-#
+-# This program is distributed in the hope that it will be useful,
+-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-# GNU General Public License for more details.
+-#
+-# You should have received a copy of the GNU General Public License
+-# along with this program; if not, write to the Free Software
+-# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-
+-INCLUDE(GenerateExportHeader)
+-
+-# destination status library
+-
+-ADD_LIBRARY(destination_status SHARED
+-  unreachable_destinations_quarantine.cc
+-  destination_status_component.cc
+-  )
+-TARGET_LINK_LIBRARIES(destination_status
+-  PUBLIC
+-  harness_stdx
+-  router_lib
+-  )
+-
+-TARGET_INCLUDE_DIRECTORIES(destination_status PRIVATE
+-  ${CMAKE_CURRENT_SOURCE_DIR}
+-  PUBLIC
+-  ${CMAKE_CURRENT_SOURCE_DIR}/../include/
+-  ${CMAKE_CURRENT_BINARY_DIR}/../include/
+-  )
+-GENERATE_EXPORT_HEADER(destination_status
+-  EXPORT_FILE_NAME
+-  ${CMAKE_CURRENT_BINARY_DIR}/../include/mysqlrouter/destination_status_export.h
+-  )
+-
+-SET_TARGET_PROPERTIES(destination_status PROPERTIES
+-  OUTPUT_NAME "mysqlrouter_destination_status"
+-  SOVERSION 1
+-  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/runtime_output_directory
+-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/library_output_directory)
+-
+-#ADD_INSTALL_RPATH_FOR_OPENSSL(destination_status)
+-#SET_PATH_TO_CUSTOM_SSL_FOR_APPLE(destination_status)
+-
+-INSTALL(TARGETS destination_status
+-  RUNTIME DESTINATION ${ROUTER_INSTALL_BINDIR} COMPONENT Router
+-  ARCHIVE DESTINATION ${ROUTER_INSTALL_LIBDIR} COMPONENT Router
+-  LIBRARY DESTINATION ${ROUTER_INSTALL_LIBDIR} COMPONENT Router
+-  NAMELINK_SKIP
+-  )
+-
+-# destination status plugin
+-
+-ADD_HARNESS_PLUGIN(destination_status_plugin
+-  OUTPUT_NAME "destination_status"
+-  SOURCES
+-  destination_status_plugin.cc
+-  REQUIRES
+-  router_lib
+-  harness_stdx
+-  destination_status
+-  DESTINATION "${ROUTER_INSTALL_PLUGINDIR}"
+-  )
+-TARGET_INCLUDE_DIRECTORIES(destination_status_plugin PRIVATE
+-  ${CMAKE_CURRENT_SOURCE_DIR}
+-  PUBLIC
+-  ${CMAKE_CURRENT_SOURCE_DIR}/../include/
+-  ${CMAKE_CURRENT_BINARY_DIR}/../include/
+-  )
+-
+-GENERATE_EXPORT_HEADER(destination_status_plugin
+-  EXPORT_FILE_NAME
+-  ${CMAKE_CURRENT_BINARY_DIR}/../include/mysqlrouter/destination_status_plugin_export.h
+-  )
+diff --git a/router/src/destination_status/src/destination_status_component.cc b/router/src/destination_status/src/destination_status_component.cc
+deleted file mode 100644
+index 48b63c2fabc..00000000000
+--- a/router/src/destination_status/src/destination_status_component.cc
++++ /dev/null
+@@ -1,86 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include "mysqlrouter/destination_status_component.h"
+-
+-#include <chrono>
+-#include <memory>
+-#include <mutex>
+-#include <string>
+-
+-#include "unreachable_destinations_quarantine.h"
+-
+-DestinationStatusComponent::~DestinationStatusComponent() = default;
+-
+-void DestinationStatusComponent::init(std::chrono::seconds quarantine_interval,
+-                                      uint32_t qurantine_threshold) {
+-  unreachable_destinations_quarantine_->init(quarantine_interval,
+-                                             qurantine_threshold);
+-}
+-
+-bool DestinationStatusComponent::report_connection_result(
+-    const mysql_harness::TCPAddress &dest, bool success) {
+-  return unreachable_destinations_quarantine_->report_connection_result(
+-      dest, success);
+-}
+-
+-bool DestinationStatusComponent::is_destination_quarantined(
+-    const mysql_harness::TCPAddress &dest) {
+-  return unreachable_destinations_quarantine_->is_quarantined(dest);
+-}
+-
+-void DestinationStatusComponent::stop_unreachable_destinations_quarantine() {
+-  unreachable_destinations_quarantine_->stop_quarantine();
+-}
+-
+-void DestinationStatusComponent::refresh_destinations_quarantine(
+-    const std::string &instance_name, const bool nodes_changed_on_md_refresh,
+-    const AllowedNodes &new_destinations) {
+-  unreachable_destinations_quarantine_->refresh_quarantine(
+-      instance_name, nodes_changed_on_md_refresh, new_destinations);
+-}
+-
+-void DestinationStatusComponent::register_route(const std::string &name) {
+-  unreachable_destinations_quarantine_->register_route(name);
+-}
+-
+-void DestinationStatusComponent::register_quarantine_callbacks(
+-    QuarantineRoutingCallbacks &&routing_callbacks) {
+-  unreachable_destinations_quarantine_->register_routing_callbacks(
+-      std::move(routing_callbacks));
+-}
+-
+-void DestinationStatusComponent::unregister_quarantine_callbacks() {
+-  unreachable_destinations_quarantine_->unregister_routing_callbacks();
+-}
+-
+-DestinationStatusComponent::DestinationStatusComponent()
+-    : unreachable_destinations_quarantine_(
+-          std::make_unique<UnreachableDestinationsQuarantine>()) {}
+-
+-DestinationStatusComponent &DestinationStatusComponent::get_instance() {
+-  static DestinationStatusComponent instance;
+-
+-  return instance;
+-}
+\ No newline at end of file
+diff --git a/router/src/destination_status/src/destination_status_plugin.cc b/router/src/destination_status/src/destination_status_plugin.cc
+deleted file mode 100644
+index fae1d1ed591..00000000000
+--- a/router/src/destination_status/src/destination_status_plugin.cc
++++ /dev/null
+@@ -1,146 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-/**
+- * destination status plugin.
+- */
+-
+-#include <array>
+-#include <chrono>
+-#include <mutex>
+-#include <stdexcept>
+-#include <system_error>
+-
+-// Harness interface include files
+-#include "mysql/harness/config_option.h"
+-#include "mysql/harness/config_parser.h"
+-#include "mysql/harness/plugin.h"
+-#include "mysql/harness/plugin_config.h"
+-
+-#include "mysqlrouter/destination_status_component.h"
+-#include "mysqlrouter/destination_status_plugin_export.h"
+-#include "mysqlrouter/supported_destination_status_options.h"
+-
+-template <class T>
+-using IntOption = mysql_harness::IntOption<T>;
+-
+-static constexpr const std::string_view kSectionName{"destination_status"};
+-
+-class DestinationStatusPluginConfig : public mysql_harness::BasePluginConfig {
+- public:
+-  uint32_t error_quarantine_threshold;
+-  std::chrono::seconds error_quarantine_interval;
+-
+-  explicit DestinationStatusPluginConfig(
+-      const mysql_harness::ConfigSection *section)
+-      : mysql_harness::BasePluginConfig(section),
+-        error_quarantine_threshold(get_option(section,
+-                                              "error_quarantine_threshold",
+-                                              IntOption<uint32_t>{1, 65535})),
+-        error_quarantine_interval(get_option(section,
+-                                             "error_quarantine_interval",
+-                                             IntOption<uint32_t>{1, 3600})) {}
+-
+-  std::string get_default(const std::string &option) const override {
+-    const std::map<std::string_view, std::string> defaults{
+-        {"error_quarantine_threshold", "1"},
+-        {"error_quarantine_interval", "1"},  // in seconds
+-    };
+-
+-    auto it = defaults.find(option);
+-
+-    return it == defaults.end() ? std::string() : it->second;
+-  }
+-
+-  [[nodiscard]] bool is_required(
+-      const std::string & /* option */) const override {
+-    return false;
+-  }
+-};
+-
+-static void init(mysql_harness::PluginFuncEnv *env) {
+-  const mysql_harness::AppInfo *info = get_app_info(env);
+-
+-  if (nullptr == info->config) {
+-    return;
+-  }
+-
+-  // assume there is only one section for us
+-  try {
+-    int sections{0};
+-
+-    for (const mysql_harness::ConfigSection *section :
+-         info->config->sections()) {
+-      if (section->name != kSectionName) continue;
+-
+-      if (sections != 0) {
+-        throw std::invalid_argument("[" + section->name +
+-                                    (section->key.empty() ? "" : ":") +
+-                                    section->key + "] already loaded.");
+-      }
+-
+-      ++sections;
+-
+-      DestinationStatusPluginConfig config{section};
+-
+-      DestinationStatusComponent::get_instance().init(
+-          config.error_quarantine_interval, config.error_quarantine_threshold);
+-    }
+-  } catch (const std::invalid_argument &exc) {
+-    set_error(env, mysql_harness::kConfigInvalidArgument, "%s", exc.what());
+-
+-  } catch (const std::exception &exc) {
+-    set_error(env, mysql_harness::kRuntimeError, "%s", exc.what());
+-  } catch (...) {
+-    set_error(env, mysql_harness::kUndefinedError, "Unexpected exception");
+-  }
+-}
+-
+-const static std::array<const char *, 2> required = {{
+-    "logger",
+-    "io",
+-}};
+-
+-extern "C" {
+-mysql_harness::Plugin DESTINATION_STATUS_PLUGIN_EXPORT
+-    harness_plugin_destination_status = {
+-        mysql_harness::PLUGIN_ABI_VERSION,       // abi-version
+-        mysql_harness::ARCHITECTURE_DESCRIPTOR,  // arch
+-        "destination status",                    // name
+-        VERSION_NUMBER(0, 0, 1),
+-        // requires
+-        required.size(),
+-        required.data(),
+-        // conflicts
+-        0,
+-        nullptr,
+-        init,
+-        nullptr,  // deinit
+-        nullptr,  // start
+-        nullptr,  // stop
+-        false,    // declares_readiness
+-        destination_status_supported_options.size(),
+-        destination_status_supported_options.data(),
+-};
+-}
+diff --git a/router/src/plugin_info/tests/test_plugin_info_app.cc b/router/src/plugin_info/tests/test_plugin_info_app.cc
+index 6dc0528ee1f..9b504b6e312 100644
+--- a/router/src/plugin_info/tests/test_plugin_info_app.cc
++++ b/router/src/plugin_info/tests/test_plugin_info_app.cc
+@@ -311,8 +311,7 @@ const Plugin_data router_plugins[]{
+         "router_protobuf",
+         "router_openssl",
+         "io",
+-        "connection_pool",
+-        "destination_status"
++        "connection_pool"
+     )",
+      ""},
+     {"metadata_cache",
+diff --git a/router/src/routing/include/mysqlrouter/destination.h b/router/src/routing/include/mysqlrouter/destination.h
+index 5485dde1a5b..b4d1e81b0e6 100644
+--- a/router/src/routing/include/mysqlrouter/destination.h
++++ b/router/src/routing/include/mysqlrouter/destination.h
+@@ -31,8 +31,6 @@
+ #include <string>        // string
+ #include <system_error>  // error_code
+ 
+-#include "tcp_address.h"
+-
+ /**
+  * Destination to forward client connections to.
+  *
+diff --git a/router/src/routing/include/mysqlrouter/routing.h b/router/src/routing/include/mysqlrouter/routing.h
+index 49f6d6a116e..e5ec15123e7 100644
+--- a/router/src/routing/include/mysqlrouter/routing.h
++++ b/router/src/routing/include/mysqlrouter/routing.h
+@@ -86,6 +86,13 @@ constexpr const unsigned int kDefaultNetBufferLength{16384};
+  */
+ constexpr const std::chrono::seconds kDefaultClientConnectTimeout{9};
+ 
++/**
++ * The number of seconds that MySQL Router waits between checking for
++ * reachability of an unreachable destination.
++ */
++constexpr const std::chrono::seconds
++    kDefaultUnreachableDestinationRefreshInterval{1};
++
+ /** @brief Modes supported by Routing plugin */
+ enum class AccessMode {
+   kUndefined = 0,
+diff --git a/router/src/destination_status/src/unreachable_destinations_quarantine.h b/router/src/routing/include/mysqlrouter/routing_common_unreachable_destinations.h
+similarity index 82%
+rename from router/src/destination_status/src/unreachable_destinations_quarantine.h
+rename to router/src/routing/include/mysqlrouter/routing_common_unreachable_destinations.h
+index 8730cd004dc..ed679f2fb41 100644
+--- a/router/src/destination_status/src/unreachable_destinations_quarantine.h
++++ b/router/src/routing/include/mysqlrouter/routing_common_unreachable_destinations.h
+@@ -22,31 +22,35 @@
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+ 
+-#ifndef MYSQLROUTER_UNREACHABLE_DESTINATIONS_QUARANTINE_INCLUDED
+-#define MYSQLROUTER_UNREACHABLE_DESTINATIONS_QUARANTINE_INCLUDED
++#ifndef MYSQLROUTER_ROUTING_COMMON_UNREACHABLE_DESTINATIONS_INCLUDED
++#define MYSQLROUTER_ROUTING_COMMON_UNREACHABLE_DESTINATIONS_INCLUDED
+ 
+ #include <chrono>
+-#include <map>
+ #include <mutex>
+ #include <vector>
+ 
++#include "destination.h"
+ #include "mysql/harness/net_ts/internet.h"
+ #include "mysql/harness/net_ts/io_context.h"
+ #include "mysql/harness/net_ts/timer.h"
+-#include "mysqlrouter/destination_status_types.h"
+ #include "mysqlrouter/io_component.h"
++#include "tcp_address.h"
++
++struct AvailableDestination;
+ 
+ /**
+  * Information about unreachable destination candidates that is shared between
+- * plugin instances.
++ * routing plugin instances.
+  *
+  * Quarantined destinations will not be used for
+  * routing purposes. Each unreachable destination candidate is periodically
+  * probed for availability and removed from the unreachable destination
+  * candidate set if it became available.
+  */
+-class UnreachableDestinationsQuarantine {
++class RoutingCommonUnreachableDestinations {
+  public:
++  using AllowedNodes = std::vector<AvailableDestination>;
++
+   /**
+    * Initialize the unreachable destination candidate mechanism.
+    *
+@@ -57,43 +61,25 @@ class UnreachableDestinationsQuarantine {
+    *   sockets
+    * - quarantine_refresh_interval Used for unreachable destination candidates
+    *   availability checks.
+-   * @param[in] quarantine_interval The interval in seconds used for checking
+-   * the health (connectivity) of the quarantined destinations.
+-   * @param[in] qurantine_threshold Number of consecutive reported failed
+-   * connections to the destination until it gets quarantined.
++   *
++   * @param[in] instance_name MySQLRouting plugin instance name.
++   * @param[in] quarantine_refresh_interval Time in seconds that will be used
++   *            for unreachable destination candidate availability checks.
+    */
+-  void init(std::chrono::seconds quarantine_interval,
+-            uint32_t qurantine_threshold);
+-
+-  void register_routing_callbacks(
+-      QuarantineRoutingCallbacks &&routing_callbacks);
+-  void unregister_routing_callbacks();
+-
+-  void register_route(const std::string &route_name);
++  void init(const std::string &instance_name,
++            std::chrono::seconds quarantine_refresh_interval);
+ 
+   /**
+-   * @brief
+-   *
+-   * Register the connection error or success to a given destination.
+-   *
+-   * If registering a success it will set the number of reported errors to a
+-   * given connection to 0.
+-   *
+-   * If registering a failure it will increment the number of reported failed
+-   * connections to the destination. If the number reached the
+-   * quarantine_threshold the destination will be added to the quarantine. If
+-   * the destination candidate is not quarantine yet it will starting the async
+-   * handler for it, otherwise it will just update the referencing plugins list.
++   * Add unreachable destination candidate to quarantine.
+    *
+-   * @param[in] dest Reported destination address.
+-   * @param[in] success Indicates if the reported connection result is success
+-   * of failure.
++   * If the destination candidate is not quarantine yet it will starting
++   * the async handler for it, otherwise it will just update the referencing
++   * routing plugins list.
+    *
+-   * @returns true if the destination got added to the quarantine, false
+-   * otherwise
++   * @param[in] dest Unreachable destination candidate address.
+    */
+-  bool report_connection_result(const mysql_harness::TCPAddress &dest,
+-                                bool success);
++  void add_destination_candidate_to_quarantine(
++      const mysql_harness::TCPAddress &dest);
+ 
+   /**
+    * Remove unreachable destination candidate from quarantine.
+@@ -148,9 +134,6 @@ class UnreachableDestinationsQuarantine {
+   void quarantine_handler(const std::error_code &ec,
+                           const mysql_harness::TCPAddress &dest);
+ 
+-  void add_destination_candidate_to_quarantine(
+-      const mysql_harness::TCPAddress &dest);
+-
+   /**
+    * Go through all routing instances and check if there are routing plugins
+    * which have all destination candidates added to quarantine, if so lets
+@@ -236,6 +219,7 @@ class UnreachableDestinationsQuarantine {
+     stdx::expected<void, std::error_code> connect_finish();
+     stdx::expected<void, std::error_code> connected();
+ 
++    RoutingCommonUnreachableDestinations *destinations_;
+     net::io_context *io_ctx_;
+     mysql_harness::TCPAddress address_;
+     std::vector<std::string> referencing_routing_instances_;
+@@ -268,13 +252,10 @@ class UnreachableDestinationsQuarantine {
+ 
+   std::chrono::milliseconds kQuarantinedConnectTimeout{1000};
+   std::chrono::seconds quarantine_interval_{1};
+-  uint32_t quarantine_threshold_{1};
+   net::io_context &io_ctx_ = IoComponent::get_instance().io_context();
+   std::mutex quarantine_mutex_;
+   std::vector<std::shared_ptr<Unreachable_destination_candidate>>
+       quarantined_destination_candidates_;
+-  std::map<mysql_harness::TCPAddress, uint32_t> destination_errors_;
+-  std::mutex destination_errors_mutex_;
+   std::mutex unreachable_destinations_init_mutex_;
+   std::mutex routing_instances_mutex_;
+   std::vector<std::string> routing_instances_;
+@@ -284,8 +265,6 @@ class UnreachableDestinationsQuarantine {
+   std::atomic<size_t> quarantined_dest_counter_{0};
+   std::condition_variable quarantine_empty_cond_;
+   std::mutex quarantine_empty_cond_m_;
+-
+-  QuarantineRoutingCallbacks routing_callbacks_;
+ };
+ 
+-#endif  // MYSQLROUTER_UNREACHABLE_DESTINATIONS_QUARANTINE_INCLUDED
++#endif  // MYSQLROUTER_ROUTING_COMMON_UNREACHABLE_DESTINATIONS_INCLUDED
+diff --git a/router/src/routing/include/mysqlrouter/routing_component.h b/router/src/routing/include/mysqlrouter/routing_component.h
+index 7fb2cc4d4fb..49dfa8eef03 100644
+--- a/router/src/routing/include/mysqlrouter/routing_component.h
++++ b/router/src/routing/include/mysqlrouter/routing_component.h
+@@ -35,6 +35,7 @@
+ #include <vector>
+ 
+ #include "mysql/harness/config_parser.h"
++#include "routing_common_unreachable_destinations.h"
+ #include "tcp_address.h"
+ 
+ class MySQLRoutingBase;
+@@ -112,8 +113,8 @@ class ROUTING_EXPORT MySQLRoutingComponent {
+ 
+   void init(const mysql_harness::Config &config);
+ 
+-  void register_route(const std::string &name,
+-                      std::shared_ptr<MySQLRoutingBase> srv);
++  void init(const std::string &name, std::shared_ptr<MySQLRoutingBase> srv,
++            std::chrono::seconds quarantine_refresh_interval);
+ 
+   void erase(const std::string &name);
+ 
+@@ -137,6 +138,8 @@ class ROUTING_EXPORT MySQLRoutingComponent {
+   uint64_t max_total_connections_{0};
+ 
+   MySQLRoutingComponent() = default;
++
++  RoutingCommonUnreachableDestinations routing_common_unreachable_destinations_;
+ };
+ 
+ #endif
+diff --git a/router/src/routing/include/mysqlrouter/supported_routing_options.h b/router/src/routing/include/mysqlrouter/supported_routing_options.h
+index 500d27db7ae..d6acf756b7f 100644
+--- a/router/src/routing/include/mysqlrouter/supported_routing_options.h
++++ b/router/src/routing/include/mysqlrouter/supported_routing_options.h
+@@ -57,8 +57,6 @@ static constexpr std::array<const char *, 29> routing_supported_options{
+     "server_ssl_crl",
+     "server_ssl_crlpath",
+     "server_ssl_curves",
+-    // that is no longer used, kept for backward compatibilty, replaced by
+-    // [destination_status].error_quarantine_interval
+-    "unreachable_destination_refresh_interval",
+-};
++    "unreachable_destination_refresh_interval"};
++
+ #endif /* MYSQLROUTER_ROUTING_SUPPORTED_ROUTING_INCLUDED */
+diff --git a/router/src/routing/src/CMakeLists.txt b/router/src/routing/src/CMakeLists.txt
+index 03552f2008b..f07849fd596 100644
+--- a/router/src/routing/src/CMakeLists.txt
++++ b/router/src/routing/src/CMakeLists.txt
+@@ -38,6 +38,7 @@ ADD_LIBRARY(routing SHARED
+   mysql_routing_common.cc
+   connection_container.cc
+   routing_component.cc
++  routing_common_unreachable_destinations.cc
+   channel.cc
+   destination_ssl_context.cc
+   classic_connection.cc
+@@ -55,7 +56,6 @@ TARGET_LINK_LIBRARIES(routing
+   ${PROTOBUF_LITE_LIBRARY}
+   metadata_cache
+   connection_pool
+-  destination_status
+   )
+ IF(SOLARIS)
+   TARGET_LINK_LIBRARIES(routing
+diff --git a/router/src/routing/src/classic_connection.cc b/router/src/routing/src/classic_connection.cc
+index eaf2f1f0cbb..8fdc82d8249 100644
+--- a/router/src/routing/src/classic_connection.cc
++++ b/router/src/routing/src/classic_connection.cc
+@@ -886,15 +886,11 @@ void MysqlRoutingClassicConnection::async_run() {
+   connector().on_connect_failure(
+       [&](std::string hostname, uint16_t port, const std::error_code last_ec) {
+         if (last_ec == std::error_code{}) return;  // no failure.
+-        if (context().shared_quarantine().update({hostname, port}, false)) {
+-          log_debug("[%s] add destination '%s:%d' to quarantine",
+-                    context().get_name().c_str(), hostname.c_str(), port);
+-        }
+-      });
+ 
+-  connector().on_connect_success([&](std::string hostname, uint16_t port) {
+-    context().shared_quarantine().update({hostname, port}, true);
+-  });
++        log_debug("[%s] add destination '%s:%d' to quarantine",
++                  context().get_name().c_str(), hostname.c_str(), port);
++        context().shared_quarantine().update({hostname, port});
++      });
+ 
+   connector().on_is_destination_good(
+       [&](const std::string &hostname, uint16_t port) {
+diff --git a/router/src/routing/src/connection.cc b/router/src/routing/src/connection.cc
+index 8d14508e8ab..14f2b826b26 100644
+--- a/router/src/routing/src/connection.cc
++++ b/router/src/routing/src/connection.cc
+@@ -219,11 +219,6 @@ stdx::expected<void, std::error_code> ConnectorBase::connected() {
+   destination_id_ =
+       endpoints_it_->host_name() + ":" + endpoints_it_->service_name();
+ 
+-  if (on_connect_success_) {
+-    on_connect_success_(endpoints_it_->host_name(),
+-                        endpoints_it_->endpoint().port());
+-  }
+-
+   return {};
+ }
+ 
+diff --git a/router/src/routing/src/connection.h b/router/src/routing/src/connection.h
+index cc32067937b..4c5a92d0da7 100644
+--- a/router/src/routing/src/connection.h
++++ b/router/src/routing/src/connection.h
+@@ -174,10 +174,6 @@ class ConnectorBase {
+     on_connect_failure_ = std::move(func);
+   }
+ 
+-  void on_connect_success(std::function<void(std::string, uint16_t)> func) {
+-    on_connect_success_ = std::move(func);
+-  }
+-
+   void on_is_destination_good(std::function<bool(std::string, uint16_t)> func) {
+     on_is_destination_good_ = std::move(func);
+   }
+@@ -224,7 +220,6 @@ class ConnectorBase {
+ 
+   std::function<void(std::string, uint16_t, std::error_code)>
+       on_connect_failure_;
+-  std::function<void(std::string, uint16_t)> on_connect_success_;
+   std::function<bool(std::string, uint16_t)> on_is_destination_good_;
+ };
+ 
+diff --git a/router/src/routing/src/destination.h b/router/src/routing/src/destination.h
+index 6a059a48069..b0c323e2fbe 100644
+--- a/router/src/routing/src/destination.h
++++ b/router/src/routing/src/destination.h
+@@ -37,7 +37,6 @@
+ #include "my_compiler.h"  // MY_ATTRIBUTE
+ #include "mysql/harness/net_ts/io_context.h"
+ #include "mysqlrouter/destination.h"
+-#include "mysqlrouter/destination_status_types.h"
+ #include "mysqlrouter/routing.h"
+ #include "protocol/protocol.h"
+ #include "tcp_address.h"
+@@ -46,6 +45,16 @@ namespace mysql_harness {
+ class PluginFuncEnv;
+ }
+ 
++struct AvailableDestination {
++  AvailableDestination(mysql_harness::TCPAddress a, std::string i)
++      : address{std::move(a)}, id{std::move(i)} {}
++
++  mysql_harness::TCPAddress address;
++  std::string id;
++};
++
++using AllowedNodes = std::vector<AvailableDestination>;
++
+ // first argument is the new set of the allowed nodes
+ // second argument is a set of nodes that can be used for new connections
+ // third argument is an indication whether we should disconnect existing
+diff --git a/router/src/routing/src/plugin_config.cc b/router/src/routing/src/plugin_config.cc
+index 9e1f213eb5a..9e67924719e 100644
+--- a/router/src/routing/src/plugin_config.cc
++++ b/router/src/routing/src/plugin_config.cc
+@@ -472,14 +472,11 @@ RoutingPluginConfig::RoutingPluginConfig(
+                      StringOption{});
+   GET_OPTION_CHECKED(dest_ssl_curves, section, "server_ssl_curves",
+                      StringOption{});
+-
+-  if (get_option(section, "unreachable_destination_refresh_interval",
+-                 StringOption{}) != "") {
+-    log_warning(
+-        "Option 'unreachable_destination_refresh_interval' is deprecated and "
+-        "has no effect. Please configure "
+-        "[destination_status].error_quarantine_interval instead.");
+-  }
++  auto unreachable_destination_refresh_interval_op =
++      IntOption<uint32_t>{1, 65535};
++  GET_OPTION_CHECKED(unreachable_destination_refresh_interval, section,
++                     "unreachable_destination_refresh_interval",
++                     unreachable_destination_refresh_interval_op);
+ 
+   using namespace std::string_literals;
+ 
+@@ -543,6 +540,9 @@ std::string RoutingPluginConfig::get_default(const std::string &option) const {
+       {"net_buffer_length", std::to_string(routing::kDefaultNetBufferLength)},
+       {"thread_stack_size",
+        std::to_string(mysql_harness::kDefaultStackSizeInKiloBytes)},
++      {"unreachable_destination_refresh_interval",
++       std::to_string(
++           routing::kDefaultUnreachableDestinationRefreshInterval.count())},
+       {"client_ssl_mode", ""},
+       {"server_ssl_mode", "as_client"},
+       {"server_ssl_verify", "disabled"},
+diff --git a/router/src/routing/src/plugin_config.h b/router/src/routing/src/plugin_config.h
+index 0c88ad529ae..05d767d600f 100644
+--- a/router/src/routing/src/plugin_config.h
++++ b/router/src/routing/src/plugin_config.h
+@@ -94,6 +94,8 @@ class ROUTING_PLUGIN_EXPORT RoutingPluginConfig
+       dest_ssl_crl_file;  //!< CRL file used to check revoked certificates
+   std::string dest_ssl_crl_dir;  //!< directory of CRL files
+   std::string dest_ssl_curves;   //!< allowed TLS curves
++
++  unsigned int unreachable_destination_refresh_interval;
+ };
+ 
+ #endif  // PLUGIN_CONFIG_ROUTING_INCLUDED
+diff --git a/router/src/destination_status/src/unreachable_destinations_quarantine.cc b/router/src/routing/src/routing_common_unreachable_destinations.cc
+similarity index 81%
+rename from router/src/destination_status/src/unreachable_destinations_quarantine.cc
+rename to router/src/routing/src/routing_common_unreachable_destinations.cc
+index f17a3223862..50c4db782d9 100644
+--- a/router/src/destination_status/src/unreachable_destinations_quarantine.cc
++++ b/router/src/routing/src/routing_common_unreachable_destinations.cc
+@@ -22,57 +22,30 @@
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+ 
+-#include "unreachable_destinations_quarantine.h"
++#include "mysqlrouter/routing_common_unreachable_destinations.h"
+ 
+ #include "mysql/harness/logging/logging.h"
++#include "mysql_routing.h"
+ 
+ IMPORT_LOG_FUNCTIONS()
+ 
+-void UnreachableDestinationsQuarantine::register_routing_callbacks(
+-    QuarantineRoutingCallbacks &&routing_callbacks) {
+-  std::lock_guard<std::mutex> quarantine_lock{quarantine_mutex_};
+-  routing_callbacks_ = std::move(routing_callbacks);
+-}
+-
+-void UnreachableDestinationsQuarantine::unregister_routing_callbacks() {
+-  std::lock_guard<std::mutex> quarantine_lock{quarantine_mutex_};
+-  routing_callbacks_.reset();
+-}
+-
+-void UnreachableDestinationsQuarantine::register_route(
+-    const std::string &route_name) {
+-  std::lock_guard<std::mutex> l{routing_instances_mutex_};
+-  routing_instances_.push_back(route_name);
+-}
+-
+-void UnreachableDestinationsQuarantine::init(
+-    std::chrono::seconds quarantine_interval, uint32_t qurantine_threshold) {
+-  quarantine_interval_ = quarantine_interval;
+-  quarantine_threshold_ = qurantine_threshold;
+-}
+-
+-bool UnreachableDestinationsQuarantine::report_connection_result(
+-    const mysql_harness::TCPAddress &dest, bool success) {
+-  bool add_to_quarantine{false};
++void RoutingCommonUnreachableDestinations::init(
++    const std::string &instance_name,
++    std::chrono::seconds quarantine_refresh_interval) {
+   {
+-    std::lock_guard<std::mutex> lock{destination_errors_mutex_};
+-    if (success) {
+-      destination_errors_.erase(dest);
+-    } else {
+-      if (++destination_errors_[dest] >= quarantine_threshold_) {
+-        add_to_quarantine = true;
+-      }
+-    }
+-  }
+-  if (add_to_quarantine) {
+-    add_destination_candidate_to_quarantine(dest);
++    std::lock_guard<std::mutex> l{unreachable_destinations_init_mutex_};
++    quarantine_interval_ = std::move(quarantine_refresh_interval);
+   }
+ 
+-  return add_to_quarantine;
++  {
++    std::lock_guard<std::mutex> l{routing_instances_mutex_};
++    routing_instances_.push_back(instance_name);
++  }
+ }
+ 
+-void UnreachableDestinationsQuarantine::add_destination_candidate_to_quarantine(
+-    const mysql_harness::TCPAddress &dest) {
++void RoutingCommonUnreachableDestinations::
++    add_destination_candidate_to_quarantine(
++        const mysql_harness::TCPAddress &dest) {
+   auto referencing_instances = get_referencing_routing_instances(dest);
+ 
+   {
+@@ -113,16 +86,12 @@ void UnreachableDestinationsQuarantine::add_destination_candidate_to_quarantine(
+   stop_socket_acceptors_on_all_nodes_quarantined();
+ }
+ 
+-void UnreachableDestinationsQuarantine::
++void RoutingCommonUnreachableDestinations::
+     remove_destination_candidate_from_quarantine(
+         const mysql_harness::TCPAddress &dest) {
+   log_debug(
+       "Destination candidate '%s' is available, remove it from quarantine",
+       dest.str().c_str());
+-  {
+-    std::lock_guard<std::mutex> lock{destination_errors_mutex_};
+-    destination_errors_.erase(dest);
+-  }
+ 
+   std::lock_guard<std::mutex> quarantine_lock{quarantine_mutex_};
+   auto pos = std::find_if(std::begin(quarantined_destination_candidates_),
+@@ -134,15 +103,18 @@ void UnreachableDestinationsQuarantine::
+     return;
+   }
+ 
++  auto &component = MySQLRoutingComponent::get_instance();
+   auto &routing_instances = (*pos)->referencing_routing_instances_;
+   for (const auto &instance_name : routing_instances) {
+-    routing_callbacks_.on_start_acceptors(instance_name);
++    auto routing_instance = component.api(instance_name);
++
++    routing_instance.restart_accepting_connections();
+   }
+ 
+   quarantined_destination_candidates_.erase(pos);
+ }
+ 
+-bool UnreachableDestinationsQuarantine::is_quarantined(
++bool RoutingCommonUnreachableDestinations::is_quarantined(
+     const mysql_harness::TCPAddress &dest) {
+   std::lock_guard<std::mutex> l{quarantine_mutex_};
+   return std::find_if(std::begin(quarantined_destination_candidates_),
+@@ -152,7 +124,7 @@ bool UnreachableDestinationsQuarantine::is_quarantined(
+                       }) != std::end(quarantined_destination_candidates_);
+ }
+ 
+-void UnreachableDestinationsQuarantine::refresh_quarantine(
++void RoutingCommonUnreachableDestinations::refresh_quarantine(
+     const std::string &instance_name, const bool nodes_changed_on_md_refresh,
+     const AllowedNodes &new_destinations) {
+   if (nodes_changed_on_md_refresh) {
+@@ -162,7 +134,7 @@ void UnreachableDestinationsQuarantine::refresh_quarantine(
+   update_destinations_state(new_destinations);
+ }
+ 
+-void UnreachableDestinationsQuarantine::stop_quarantine() {
++void RoutingCommonUnreachableDestinations::stop_quarantine() {
+   {
+     std::lock_guard<std::mutex> l{quarantine_mutex_};
+     if (stopped_) return;
+@@ -182,7 +154,7 @@ void UnreachableDestinationsQuarantine::stop_quarantine() {
+                               [&] { return quarantined_dest_counter_ == 0; });
+ }
+ 
+-void UnreachableDestinationsQuarantine::quarantine_handler(
++void RoutingCommonUnreachableDestinations::quarantine_handler(
+     const std::error_code &ec, const mysql_harness::TCPAddress &dest) {
+   // Either there is an quarantine update or we are shutting down.
+   if (ec && ec == std::errc::operation_canceled) {
+@@ -256,29 +228,32 @@ void UnreachableDestinationsQuarantine::quarantine_handler(
+   }
+ }
+ 
+-void UnreachableDestinationsQuarantine::
++void RoutingCommonUnreachableDestinations::
+     stop_socket_acceptors_on_all_nodes_quarantined() {
++  auto &component = MySQLRoutingComponent::get_instance();
++
+   std::lock_guard<std::mutex> plugins_lock{routing_instances_mutex_};
+   for (const auto &instance_name : routing_instances_) {
+-    const auto destinations =
+-        routing_callbacks_.on_get_destinations(instance_name);
++    auto routing_instance = component.api(instance_name);
++    const auto destinations = routing_instance.get_destinations();
+ 
+     if (std::all_of(
+             std::cbegin(destinations), std::cend(destinations),
+             [this](const auto &dest) { return is_quarantined(dest); })) {
+-      routing_callbacks_.on_stop_acceptors(instance_name);
++      routing_instance.stop_socket_acceptors();
+     }
+   }
+ }
+ 
+ std::vector<std::string>
+-UnreachableDestinationsQuarantine::get_referencing_routing_instances(
++RoutingCommonUnreachableDestinations::get_referencing_routing_instances(
+     const mysql_harness::TCPAddress &destination) {
++  auto &component = MySQLRoutingComponent::get_instance();
++
+   std::vector<std::string> referencing_instances;
+   std::lock_guard<std::mutex> l{routing_instances_mutex_};
+   for (const auto &instance_name : routing_instances_) {
+-    const auto destinations =
+-        routing_callbacks_.on_get_destinations(instance_name);
++    const auto destinations = component.api(instance_name).get_destinations();
+     if (std::cend(destinations) != std::find(std::cbegin(destinations),
+                                              std::cend(destinations),
+                                              destination)) {
+@@ -288,7 +263,7 @@ UnreachableDestinationsQuarantine::get_referencing_routing_instances(
+   return referencing_instances;
+ }
+ 
+-void UnreachableDestinationsQuarantine::update_destinations_state(
++void RoutingCommonUnreachableDestinations::update_destinations_state(
+     const AllowedNodes &destination_list) {
+   std::lock_guard<std::mutex> l{quarantine_mutex_};
+   for (const auto &destination : destination_list) {
+@@ -304,7 +279,7 @@ void UnreachableDestinationsQuarantine::update_destinations_state(
+   }
+ }
+ 
+-void UnreachableDestinationsQuarantine::drop_stray_destinations(
++void RoutingCommonUnreachableDestinations::drop_stray_destinations(
+     const std::string &instance_name,
+     const AllowedNodes &routing_new_destinations) {
+   std::lock_guard<std::mutex> l{quarantine_mutex_};
+@@ -344,7 +319,7 @@ void UnreachableDestinationsQuarantine::drop_stray_destinations(
+   }
+ }
+ 
+-UnreachableDestinationsQuarantine::Unreachable_destination_candidate::
++RoutingCommonUnreachableDestinations::Unreachable_destination_candidate::
+     ~Unreachable_destination_candidate() {
+   referencing_routing_instances_.clear();
+   timer_.cancel();
+@@ -353,7 +328,7 @@ UnreachableDestinationsQuarantine::Unreachable_destination_candidate::
+   }
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::connect() {
+   switch (func_) {
+     case Function::kInitDestination: {
+@@ -376,7 +351,7 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   return {};
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::resolve() {
+   net::ip::tcp::resolver resolver(*io_ctx_);
+   const auto resolve_res =
+@@ -391,14 +366,14 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   return init_endpoint();
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::init_endpoint() {
+   endpoints_it_ = endpoints_.begin();
+ 
+   return connect_init();
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::connect_init() {
+   // close socket if it is already open
+   server_sock_.close();
+@@ -409,7 +384,7 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   return {};
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::try_connect() {
+   const int socket_flags {
+ #if defined(SOCK_NONBLOCK)
+@@ -443,7 +418,7 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   return connected();
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::next_endpoint() {
+   std::advance(endpoints_it_, 1);
+ 
+@@ -454,7 +429,7 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   }
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::connect_finish() {
+   if (connect_timed_out_) {
+     last_ec_ = make_error_code(std::errc::timed_out);
+@@ -488,7 +463,7 @@ stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
+   return connected();
+ }
+ 
+-stdx::expected<void, std::error_code> UnreachableDestinationsQuarantine::
++stdx::expected<void, std::error_code> RoutingCommonUnreachableDestinations::
+     Unreachable_destination_candidate::connected() {
+   connected_ = true;
+ 
+diff --git a/router/src/routing/src/routing_component.cc b/router/src/routing/src/routing_component.cc
+index f8f4448ef4e..9cd047ded66 100644
+--- a/router/src/routing/src/routing_component.cc
++++ b/router/src/routing/src/routing_component.cc
+@@ -23,16 +23,16 @@
+ */
+ 
+ #include "mysqlrouter/routing_component.h"
++#include "mysql/harness/config_option.h"
+ 
+-#include <algorithm>
+ #include <cstring>
+ 
+-#include "mysql/harness/config_option.h"
+ #include "mysql_routing_base.h"
+-#include "mysqlrouter/destination_status_component.h"
+-#include "mysqlrouter/destination_status_types.h"
+ #include "mysqlrouter/routing.h"
+ 
++#include <algorithm>
++#include <iostream>
++
+ using namespace std::string_literals;
+ 
+ int MySQLRoutingAPI::get_max_connections() const {
+@@ -132,45 +132,40 @@ void MySQLRoutingAPI::stop_socket_acceptors() { r_->stop_socket_acceptors(); }
+ bool MySQLRoutingAPI::is_running() const { return r_->is_running(); }
+ 
+ void MySQLRoutingComponent::deinit() {
+-  DestinationStatusComponent::get_instance()
+-      .stop_unreachable_destinations_quarantine();
++  routing_common_unreachable_destinations_.stop_quarantine();
+   for (auto &route : routes_) {
+     if (auto routing_plugin = route.second.lock()) {
+       routing_plugin->get_context().shared_quarantine().reset();
+     }
+   }
+-
+-  DestinationStatusComponent::get_instance().unregister_quarantine_callbacks();
+ }
+ 
+-void MySQLRoutingComponent::register_route(
+-    const std::string &name, std::shared_ptr<MySQLRoutingBase> srv) {
++void MySQLRoutingComponent::init(
++    const std::string &name, std::shared_ptr<MySQLRoutingBase> srv,
++    std::chrono::seconds quarantine_refresh_interval) {
+   auto &quarantine = srv->get_context().shared_quarantine();
+ 
+-  quarantine.on_update([&](const mysql_harness::TCPAddress &addr,
+-                           bool success) -> bool {
+-    return DestinationStatusComponent::get_instance().report_connection_result(
+-        addr, success);
++  quarantine.on_update([&](const mysql_harness::TCPAddress &addr) {
++    routing_common_unreachable_destinations_
++        .add_destination_candidate_to_quarantine(addr);
+   });
+ 
+   quarantine.on_is_quarantined([&](const mysql_harness::TCPAddress &addr) {
+-    return DestinationStatusComponent::get_instance()
+-        .is_destination_quarantined(addr);
++    return routing_common_unreachable_destinations_.is_quarantined(addr);
+   });
+ 
+-  quarantine.on_stop([&]() {
+-    DestinationStatusComponent::get_instance()
+-        .stop_unreachable_destinations_quarantine();
+-  });
++  quarantine.on_stop(
++      [&]() { routing_common_unreachable_destinations_.stop_quarantine(); });
+ 
+   quarantine.on_refresh([&](const std::string &instance_name,
+                             const bool nodes_changed_on_md_refresh,
+                             const AllowedNodes &available_destinations) {
+-    DestinationStatusComponent::get_instance().refresh_destinations_quarantine(
++    routing_common_unreachable_destinations_.refresh_quarantine(
+         instance_name, nodes_changed_on_md_refresh, available_destinations);
+   });
+ 
+-  DestinationStatusComponent::get_instance().register_route(name);
++  routing_common_unreachable_destinations_.init(
++      name, std::move(quarantine_refresh_interval));
+ 
+   std::lock_guard<std::mutex> lock(routes_mu_);
+ 
+@@ -251,23 +246,4 @@ void MySQLRoutingComponent::init(const mysql_harness::Config &config) {
+   max_total_connections_ = get_uint64_config(
+       config, "max_total_connections", 1, std::numeric_limits<int64_t>::max(),
+       kDefaultMaxTotalConnections);
+-
+-  QuarantineRoutingCallbacks quarantine_callbacks;
+-  quarantine_callbacks.on_get_destinations = [&](
+-      const std::string &route_name) -> auto {
+-    return this->api(route_name).get_destinations();
+-  };
+-
+-  quarantine_callbacks.on_start_acceptors =
+-      [&](const std::string &route_name) -> void {
+-    this->api(route_name).restart_accepting_connections();
+-  };
+-
+-  quarantine_callbacks.on_stop_acceptors =
+-      [&](const std::string &route_name) -> void {
+-    this->api(route_name).stop_socket_acceptors();
+-  };
+-
+-  DestinationStatusComponent::get_instance().register_quarantine_callbacks(
+-      std::move(quarantine_callbacks));
+ }
+diff --git a/router/src/routing/src/routing_plugin.cc b/router/src/routing/src/routing_plugin.cc
+index 3a78acac878..96895f027e3 100644
+--- a/router/src/routing/src/routing_plugin.cc
++++ b/router/src/routing/src/routing_plugin.cc
+@@ -419,7 +419,9 @@ static void start(mysql_harness::PluginFuncEnv *env) {
+     } catch (const URIError &) {
+       r->set_destinations_from_csv(config.destinations);
+     }
+-    MySQLRoutingComponent::get_instance().register_route(section->key, r);
++    MySQLRoutingComponent::get_instance().init(
++        section->key, r,
++        std::chrono::seconds(config.unreachable_destination_refresh_interval));
+ 
+     Scope_guard guard{[section_key = section->key]() {
+       MySQLRoutingComponent::get_instance().erase(section_key);
+@@ -449,13 +451,12 @@ static void deinit(mysql_harness::PluginFuncEnv * /* env */) {
+   io_context_work_guards.clear();
+ }
+ 
+-static const std::array<const char *, 6> required = {{
++static const std::array<const char *, 5> required = {{
+     "logger",
+     "router_protobuf",
+     "router_openssl",
+     "io",
+     "connection_pool",
+-    "destination_status",
+ }};
+ 
+ mysql_harness::Plugin ROUTING_PLUGIN_EXPORT harness_plugin_routing = {
+diff --git a/router/src/routing/src/shared_quarantine_handler.h b/router/src/routing/src/shared_quarantine_handler.h
+index 32a6d810be6..f0b9eae6b83 100644
+--- a/router/src/routing/src/shared_quarantine_handler.h
++++ b/router/src/routing/src/shared_quarantine_handler.h
+@@ -34,8 +34,7 @@
+ 
+ class SharedQuarantineHandler {
+  public:
+-  using update_callback_type =
+-      std::function<bool(mysql_harness::TCPAddress, bool)>;
++  using update_callback_type = std::function<void(mysql_harness::TCPAddress)>;
+   using is_quarantined_callback_type =
+       std::function<bool(mysql_harness::TCPAddress)>;
+   using stop_callback_type = std::function<void()>;
+@@ -51,9 +50,8 @@ class SharedQuarantineHandler {
+    */
+   void on_update(update_callback_type clb) { on_update_ = std::move(clb); }
+ 
+-  bool update(const mysql_harness::TCPAddress &addr, bool success) {
+-    if (on_update_) return on_update_(addr, success);
+-    return false;
++  void update(const mysql_harness::TCPAddress &addr) {
++    if (on_update_) on_update_(addr);
+   }
+ 
+   /**
+diff --git a/router/tests/component/CMakeLists.txt b/router/tests/component/CMakeLists.txt
+index ea993ef35a6..cca4140756c 100644
+--- a/router/tests/component/CMakeLists.txt
++++ b/router/tests/component/CMakeLists.txt
+@@ -80,7 +80,6 @@ FOREACH(test_file
+     test_metadata_http_auth_backend.cc
+     test_socket_close.cc
+     test_stacktrace.cc
+-    test_destination_status.cc
+     )
+ add_test_file(${CMAKE_CURRENT_SOURCE_DIR}/${test_file}
+   MODULE "component"
+diff --git a/router/tests/component/test_bootstrap_clusterset.cc b/router/tests/component/test_bootstrap_clusterset.cc
+index 93371d38077..270a7f3d22b 100644
+--- a/router/tests/component/test_bootstrap_clusterset.cc
++++ b/router/tests/component/test_bootstrap_clusterset.cc
+@@ -27,6 +27,8 @@
+ #include <gmock/gmock.h>
+ 
+ #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
++// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
++// globally and require to include my_rapidjson_size_t.h
+ #include "my_rapidjson_size_t.h"
+ #endif
+ #include <rapidjson/document.h>
+diff --git a/router/tests/component/test_clusterset.cc b/router/tests/component/test_clusterset.cc
+index 8bd029168f8..cfb0e567f20 100644
+--- a/router/tests/component/test_clusterset.cc
++++ b/router/tests/component/test_clusterset.cc
+@@ -28,6 +28,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ #include <thread>
+ 
+ #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
++// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
++// globally and require to include my_rapidjson_size_t.h
+ #include "my_rapidjson_size_t.h"
+ #endif
+ 
+@@ -61,6 +63,8 @@ Path g_origin_path;
+ 
+ class ClusterSetTest : public RouterComponentClusterSetTest {
+  protected:
++  void SetUp() override { RouterComponentTest::SetUp(); }
++
+   std::pair<std::string, std::map<std::string, std::string>>
+   metadata_cache_section(const std::chrono::milliseconds ttl = kTTL,
+                          const std::string &cluster_type_str = "gr") {
+diff --git a/router/tests/component/test_destination_status.cc b/router/tests/component/test_destination_status.cc
+deleted file mode 100644
+index 50dff0c1ead..00000000000
+--- a/router/tests/component/test_destination_status.cc
++++ /dev/null
+@@ -1,125 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#include <chrono>
+-#include <thread>
+-
+-#include <gmock/gmock.h>
+-#include <gtest/gtest.h>
+-
+-#include "config_builder.h"
+-#include "mock_server_rest_client.h"
+-#include "mock_server_testutils.h"
+-#include "mysqlrouter/mysql_session.h"
+-#include "rest_metadata_client.h"
+-#include "router_component_test.h"
+-#include "router_component_testutils.h"
+-#include "router_test_helpers.h"
+-#include "tcp_port_pool.h"
+-
+-using namespace std::chrono_literals;
+-
+-class DestinationStatusTest : public RouterComponentTest {
+- protected:
+-  std::string get_destination_status_section(
+-      const std::string &quarantine_interval,
+-      const std::string &quarantine_threshold) {
+-    return mysql_harness::ConfigBuilder::build_section(
+-        "destination_status",
+-        {
+-            {"error_quarantine_interval", quarantine_interval},
+-            {"error_quarantine_threshold", quarantine_threshold},
+-        });
+-  }
+-
+-  auto &launch_router(const std::string &sections, const int expected_exitcode,
+-                      std::chrono::milliseconds wait_for_notify_ready = 30s) {
+-    auto default_section = get_DEFAULT_defaults();
+-    init_keyring(default_section, get_test_temp_dir_name());
+-
+-    const std::string conf_file = create_config_file(
+-        get_test_temp_dir_name(), sections, &default_section);
+-
+-    auto &router =
+-        ProcessManager::launch_router({"-c", conf_file}, expected_exitcode,
+-                                      true, false, wait_for_notify_ready);
+-
+-    return router;
+-  }
+-};
+-
+-class QuarantineThresholdInvalidValueTest
+-    : public DestinationStatusTest,
+-      public ::testing::WithParamInterface<std::string> {};
+-
+-TEST_P(QuarantineThresholdInvalidValueTest, InvalidValues) {
+-  const std::string kCorrectInterval{"1"};
+-  const std::string destination_status_section =
+-      get_destination_status_section(kCorrectInterval, GetParam());
+-  auto &router = launch_router(destination_status_section, EXIT_FAILURE, -1s);
+-
+-  check_exit_code(router, EXIT_FAILURE);
+-  EXPECT_TRUE(wait_log_contains(
+-      router,
+-      "Configuration error: option error_quarantine_threshold in "
+-      "\\[destination_status\\] needs value between 1 and 65535 inclusive, "
+-      "was '" +
+-          GetParam() + "'",
+-      500ms));
+-}
+-
+-INSTANTIATE_TEST_SUITE_P(InvalidValues, QuarantineThresholdInvalidValueTest,
+-                         ::testing::Values("''", "0", "1.2", "-1", "65536",
+-                                           "foo"));
+-
+-class QuarantineIntervalInvalidValueTest
+-    : public DestinationStatusTest,
+-      public ::testing::WithParamInterface<std::string> {};
+-
+-TEST_P(QuarantineIntervalInvalidValueTest, InvalidValues) {
+-  const std::string kCorrectThreshold{"1"};
+-  const std::string destination_status_section =
+-      get_destination_status_section(GetParam(), kCorrectThreshold);
+-  auto &router = launch_router(destination_status_section, EXIT_FAILURE, -1s);
+-
+-  check_exit_code(router, EXIT_FAILURE);
+-  EXPECT_TRUE(wait_log_contains(
+-      router,
+-      "Configuration error: option error_quarantine_interval in "
+-      "\\[destination_status\\] needs value between 1 and 3600 inclusive, "
+-      "was '" +
+-          GetParam() + "'",
+-      500ms));
+-}
+-
+-INSTANTIATE_TEST_SUITE_P(InvalidValues, QuarantineIntervalInvalidValueTest,
+-                         ::testing::Values("''", "0", "1.2", "-1", "3601",
+-                                           "foo"));
+-
+-int main(int argc, char *argv[]) {
+-  init_windows_sockets();
+-  ProcessManager::set_origin(Path(argv[0]).dirname());
+-  ::testing::InitGoogleTest(&argc, argv);
+-  return RUN_ALL_TESTS();
+-}
+diff --git a/router/tests/component/test_router_configuration_errors.cc b/router/tests/component/test_router_configuration_errors.cc
+index bfa3e58b590..e7bd3ae23cb 100644
+--- a/router/tests/component/test_router_configuration_errors.cc
++++ b/router/tests/component/test_router_configuration_errors.cc
+@@ -437,6 +437,50 @@ INSTANTIATE_TEST_SUITE_P(
+     });
+ #endif
+ 
++class RouterDefaultConfigSectionTest : public RouterComponentTest {};
++
++class UnreachableDestinationRefreshIntervalOption
++    : public RouterDefaultConfigSectionTest,
++      public ::testing::WithParamInterface<std::string> {};
++
++/**
++ * @test WL14663:TS_R2_1
++ */
++TEST_P(UnreachableDestinationRefreshIntervalOption, ensure) {
++  TempDirectory conf_dir_;
++  auto default_section = get_DEFAULT_defaults();
++  const std::string unreachable_dest_refresh =
++      "unreachable_destination_refresh_interval = " + GetParam();
++
++  std::vector<std::string> sections{mysql_harness::ConfigBuilder::build_section(
++      "routing", {
++                     {"bind_address", "127.0.0.1:7001"},
++                     {"destinations", "127.0.0.1:3306"},
++                     {"mode", "read-only"},
++                     {"connect_timeout", "1"},
++                 })};
++  const std::string conf_file{
++      create_config_file(conf_dir_.name(), mysql_harness::join(sections, ""),
++                         &default_section, "test", unreachable_dest_refresh)};
++
++  auto &router{
++      launch_router({"-c", conf_file}, EXIT_FAILURE, true, false, -1s)};
++
++  check_exit_code(router, EXIT_FAILURE);
++
++  EXPECT_THAT(router.get_logfile_content(),
++              ::testing::HasSubstr(
++                  "Configuration error: option "
++                  "unreachable_destination_refresh_interval in [default] needs "
++                  "value between 1 and 65535 inclusive, was '" +
++                  GetParam() + "'"));
++}
++
++INSTANTIATE_TEST_SUITE_P(UnreachableDestinationRefreshIntervalOptionTest,
++                         UnreachableDestinationRefreshIntervalOption,
++                         ::testing::ValuesIn(std::vector<std::string>{
++                             "0", "-1", "65536", "10a"}));
++
+ class RouterCmdlineTest : public RouterComponentTest {
+  protected:
+   TempDirectory conf_dir_;
+diff --git a/router/tests/component/test_routing_strategy.cc b/router/tests/component/test_routing_strategy.cc
+index 9fbeb9d11c3..1fb0970aa01 100644
+--- a/router/tests/component/test_routing_strategy.cc
++++ b/router/tests/component/test_routing_strategy.cc
+@@ -28,7 +28,6 @@
+ #include <gmock/gmock.h>
+ #include <gtest/gtest.h>
+ 
+-#include "config_builder.h"
+ #include "mock_server_rest_client.h"
+ #include "mock_server_testutils.h"
+ #include "mysqlrouter/mysql_session.h"
+@@ -65,80 +64,83 @@ class RouterRoutingStrategyTest : public RouterComponentTest {
+ 
+   std::string get_metadata_cache_section(const uint16_t metadata_server_port,
+                                          const uint16_t ttl = 300) const {
+-    return mysql_harness::ConfigBuilder::build_section(
+-        "metadata_cache:test",
+-        {{"router_id", "1"},
+-         {"bootstrap_server_addresses",
+-          "mysql://localhost:" + std::to_string(metadata_server_port)},
+-         {"user", "mysql_router1_user"},
+-         {"metadata_cluster", "test"},
+-         {"ttl", std::to_string(ttl)}});
++    return "[metadata_cache:test]\n"
++           "router_id=1\n"
++           "bootstrap_server_addresses=mysql://localhost:" +
++           std::to_string(metadata_server_port) +
++           "\n"
++           "user=mysql_router1_user\n"
++           "metadata_cluster=test\n"
++           "ttl=" +
++           std::to_string(ttl) + "\n\n";
+   }
+ 
+   std::string get_static_routing_section(
+       unsigned router_port, const std::vector<uint16_t> &destinations,
+       const std::string &strategy, const std::string &mode = "",
+       const std::string &name = "test_default") const {
+-    std::string dest;
++    std::string result = "[routing:" + name +
++                         "]\n"
++                         "bind_port=" +
++                         std::to_string(router_port) + "\n" +
++                         "protocol=classic\n";
++
++    result += "destinations=";
+     for (size_t i = 0; i < destinations.size(); ++i) {
+-      dest += "127.0.0.1:" + std::to_string(destinations[i]);
++      result += "127.0.0.1:" + std::to_string(destinations[i]);
+       if (i != destinations.size() - 1) {
+-        dest += ",";
++        result += ",";
+       }
+     }
++    result += "\n";
+ 
+-    std::vector<std::pair<std::string, std::string>> options{
+-        {"bind_port", std::to_string(router_port)},
+-        {"destinations", dest},
+-        {"protocol", "classic"}};
+-
+-    if (!strategy.empty()) options.emplace_back("routing_strategy", strategy);
+-    if (!mode.empty()) options.emplace_back("mode", mode);
++    if (!strategy.empty())
++      result += std::string("routing_strategy=" + strategy + "\n");
++    if (!mode.empty()) result += std::string("mode=" + mode + "\n");
+ 
+-    return mysql_harness::ConfigBuilder::build_section("routing:" + name,
+-                                                       options);
++    return result;
+   }
+ 
+   // for error scenarios allow empty values
+   std::string get_static_routing_section_error(
+       unsigned router_port, const std::vector<unsigned> &destinations,
+       const std::string &strategy, const std::string &mode) const {
+-    std::string dest;
++    std::string result =
++        "[routing:test_default]\n"
++        "bind_port=" +
++        std::to_string(router_port) + "\n" + "protocol=classic\n";
++
++    result += "destinations=";
+     for (size_t i = 0; i < destinations.size(); ++i) {
+-      dest += "localhost:" + std::to_string(destinations[i]);
++      result += "localhost:" + std::to_string(destinations[i]);
+       if (i != destinations.size() - 1) {
+-        dest += ",";
++        result += ",";
+       }
+     }
++    result += "\n";
++    result += std::string("routing_strategy=" + strategy + "\n");
++    result += std::string("mode=" + mode + "\n");
+ 
+-    return mysql_harness::ConfigBuilder::build_section(
+-        "routing:test_default", {{"bind_port", std::to_string(router_port)},
+-                                 {"destinations", dest},
+-                                 {"protocol", "classic"},
+-                                 {"routing_strategy", strategy},
+-                                 {"mode", mode}});
++    return result;
+   }
+ 
+   std::string get_metadata_cache_routing_section(
+       unsigned router_port, const std::string &role,
+       const std::string &strategy, const std::string &mode = "",
+-      const std::string &name = "test_default",
+-      const std::optional<std::chrono::seconds>
+-          unreachable_destination_refresh_interval = std::nullopt) const {
+-    std::vector<std::pair<std::string, std::string>> options{
+-        {"bind_port", std::to_string(router_port)},
+-        {"destinations", "metadata-cache://test/default?role=" + role},
+-        {"protocol", "classic"}};
+-
+-    if (!strategy.empty()) options.emplace_back("routing_strategy", strategy);
+-    if (!mode.empty()) options.emplace_back("mode", mode);
+-    if (unreachable_destination_refresh_interval)
+-      options.emplace_back(
+-          "unreachable_destination_refresh_interval",
+-          std::to_string((*unreachable_destination_refresh_interval).count()));
+-
+-    return mysql_harness::ConfigBuilder::build_section("routing:" + name,
+-                                                       options);
++      const std::string &name = "test_default") const {
++    std::string result =
++        "[routing:" + name +
++        "]\n"
++        "bind_port=" +
++        std::to_string(router_port) + "\n" +
++        "destinations=metadata-cache://test/default?role=" + role + "\n" +
++        "protocol=classic\n";
++
++    if (!strategy.empty())
++      result += std::string("routing_strategy=" + strategy + "\n");
++    if (!mode.empty()) result += std::string("mode=" + mode + "\n");
++
++    return result;
+   }
+ 
+   std::string get_monitoring_section(unsigned monitoring_port,
+@@ -162,38 +164,21 @@ class RouterRoutingStrategyTest : public RouterComponentTest {
+       check_exit_code(cmd, EXIT_SUCCESS);
+     }
+ 
+-    return mysql_harness::ConfigBuilder::build_section("rest_api", {}) +
+-           mysql_harness::ConfigBuilder::build_section(
+-               "rest_metadata_cache", {{"require_realm", "somerealm"}}) +
+-           mysql_harness::ConfigBuilder::build_section(
+-               "http_auth_realm:somerealm", {{"backend", "somebackend"},
+-                                             {"method", "basic"},
+-                                             {"name", "somerealm"}}) +
+-           mysql_harness::ConfigBuilder::build_section(
+-               "http_auth_backend:somebackend",
+-               {{"backend", "file"}, {"filename", passwd_filename}}) +
+-           mysql_harness::ConfigBuilder::build_section(
+-               "http_server", {{"port", std::to_string(monitoring_port)}});
+-  }
+-
+-  std::string get_destination_status_section(
+-      std::optional<std::chrono::seconds> quarantine_interval,
+-      std::optional<uint32_t> quarantine_threshold) {
+-    std::vector<std::pair<std::string, std::string>> options{};
+-
+-    if (quarantine_interval)
+-      options.emplace_back("error_quarantine_interval",
+-                           std::to_string((*quarantine_interval).count()));
+-    if (quarantine_threshold)
+-      options.emplace_back("error_quarantine_threshold",
+-                           std::to_string(*quarantine_threshold));
+-
+-    if (options.empty()) {
+-      return "";
+-    } else {
+-      return mysql_harness::ConfigBuilder::build_section("destination_status",
+-                                                         options);
+-    }
++    return "[rest_api]\n"
++           "[rest_metadata_cache]\n"
++           "require_realm=somerealm\n"
++           "[http_auth_realm:somerealm]\n"
++           "backend=somebackend\n"
++           "method=basic\n"
++           "name=somerealm\n"
++           "[http_auth_backend:somebackend]\n"
++           "backend=file\n"
++           "filename=" +
++           passwd_filename +
++           "\n"
++           "[http_server]\n"
++           "port=" +
++           std::to_string(monitoring_port) + "\n";
+   }
+ 
+   // need to return void to be able to use ASSERT_ macros
+@@ -1118,21 +1103,10 @@ TEST_F(RouterRoutingStrategyMetadataCache, SharedQuarantine) {
+ class UnreachableDestinationRefreshIntervalOption
+     : public RouterRoutingStrategyTest {};
+ 
+-struct QuarantineTestParam {
+-  std::optional<std::chrono::seconds> interval;
+-  std::optional<uint32_t> threshold;
+-  // old, deprecated option for interval
+-  std::optional<std::chrono::seconds> unreachable_destination_refresh_interval;
+-};
+-
+-class UnreachableDestinationQuarantineOptions
+-    : public RouterRoutingStrategyTest,
+-      public ::testing::WithParamInterface<QuarantineTestParam> {};
+-
+ /**
+  * @test WL14663:TS_R2_2
+  */
+-TEST_P(UnreachableDestinationQuarantineOptions, Test) {
++TEST_F(UnreachableDestinationRefreshIntervalOption, CustomValue) {
+   TempDirectory temp_test_dir;
+ 
+   const std::vector<uint16_t> cluster_nodes_ports{
+@@ -1168,21 +1142,21 @@ TEST_P(UnreachableDestinationQuarantineOptions, Test) {
+   const std::string metadata_cache_section =
+       get_metadata_cache_section(cluster_nodes_ports[0]);
+   const std::string routing_section = get_metadata_cache_routing_section(
+-      classic_RO_bind_port, "SECONDARY", "round-robin", "", "c_ro",
+-      GetParam().unreachable_destination_refresh_interval);
++      classic_RO_bind_port, "SECONDARY", "round-robin", "", "c_ro");
+   const auto monitoring_port = port_pool_.get_next_available();
+   const std::string monitoring_section =
+       get_monitoring_section(monitoring_port, temp_test_dir.name());
+ 
+   auto default_section = get_DEFAULT_defaults();
+   init_keyring(default_section, temp_test_dir.name());
+-  const std::string destination_status_section =
+-      get_destination_status_section(GetParam().interval, GetParam().threshold);
+-  const std::string conf_file{
+-      create_config_file(temp_test_dir.name(),
+-                         routing_section + metadata_cache_section +
+-                             monitoring_section + destination_status_section,
+-                         &default_section, "test")};
++  const std::chrono::seconds unreachable_dest_refresh_value{2};
++  const std::string unreachable_dest_refresh =
++      "unreachable_destination_refresh_interval = " +
++      std::to_string(unreachable_dest_refresh_value.count());
++  const std::string conf_file{create_config_file(
++      temp_test_dir.name(),
++      routing_section + metadata_cache_section + monitoring_section,
++      &default_section, "test", unreachable_dest_refresh)};
+ 
+   auto &router{ProcessManager::launch_router({"-c", conf_file}, EXIT_SUCCESS)};
+ 
+@@ -1192,48 +1166,17 @@ TEST_P(UnreachableDestinationQuarantineOptions, Test) {
+   ASSERT_NO_ERROR(rest_metadata_client.wait_for_cache_ready(
+       wait_for_cache_ready_timeout, metadata_status));
+ 
+-  const std::string deprecate_warning =
+-      "Option 'unreachable_destination_refresh_interval' is deprecated and "
+-      "has no effect. Please configure "
+-      "[destination_status].error_quarantine_interval instead.";
+-  if (GetParam().unreachable_destination_refresh_interval) {
+-    EXPECT_THAT(router.get_logfile_content(),
+-                ::testing::HasSubstr(deprecate_warning));
+-
+-  } else {
+-    EXPECT_THAT(router.get_logfile_content(),
+-                ::testing::Not(::testing::HasSubstr(deprecate_warning)));
+-  }
+-
+   SCOPED_TRACE("// make first RO node unavailable");
+   cluster_nodes[1]->send_clean_shutdown_event();
+   EXPECT_EQ(cluster_nodes[1]->wait_for_exit(), 0);
++  make_new_connection_ok(classic_RO_bind_port, cluster_nodes_ports[2]);
++  EXPECT_TRUE(wait_log_contains(router,
++                                "add destination '.*" +
++                                    std::to_string(cluster_nodes_ports[1]) +
++                                    "' to quarantine",
++                                500ms));
+ 
+-  const std::string quarantine_pattern =
+-      "add destination '.*" + std::to_string(cluster_nodes_ports[1]) +
+-      "' to quarantine";
+-  const auto threshold = GetParam().threshold ? *(GetParam().threshold) : 1;
+-  const auto interval = GetParam().interval ? *(GetParam().interval) : 1s;
+-
+-  for (size_t i = 1; i <= threshold; ++i) {
+-    // first node is down so we expect it to be skipped and 2 consecutive
+-    // connections to be routed to nodes 2 and 3.
+-
+-    make_new_connection_ok(classic_RO_bind_port, cluster_nodes_ports[2]);
+-    make_new_connection_ok(classic_RO_bind_port, cluster_nodes_ports[3]);
+-
+-    // the node should be quarantined only after reaching a threshold
+-    const std::string log_content = router.get_logfile_content();
+-    if (i < threshold) {
+-      EXPECT_THAT(log_content,
+-                  testing::Not(testing::HasSubstr(quarantine_pattern)))
+-          << log_content;
+-    } else {
+-      EXPECT_TRUE(wait_log_contains(router, quarantine_pattern, 500ms));
+-    }
+-  }
+-
+-  SCOPED_TRACE("// restore first RO node");
++  SCOPED_TRACE("// restore first RO node unavailable");
+   cluster_nodes[1] =
+       &launch_cluster_node(cluster_nodes_ports[1], get_data_dir().str());
+ 
+@@ -1246,32 +1189,14 @@ TEST_P(UnreachableDestinationQuarantineOptions, Test) {
+   const auto end_point = std::chrono::steady_clock::now();
+ 
+   const std::chrono::seconds margin{1};
+-  EXPECT_THAT(end_point - start_point,
+-              ::testing::AllOf(::testing::Ge(interval - margin),
+-                               ::testing::Le(interval + margin)));
++  EXPECT_THAT(
++      end_point - start_point,
++      ::testing::AllOf(::testing::Ge(unreachable_dest_refresh_value - margin),
++                       ::testing::Le(unreachable_dest_refresh_value + margin)));
+ 
+   ASSERT_THAT(router.kill(), testing::Eq(0));
+ }
+ 
+-INSTANTIATE_TEST_SUITE_P(
+-    Test, UnreachableDestinationQuarantineOptions,
+-    ::testing::Values(
+-        QuarantineTestParam{/*interval=default*/ std::nullopt,
+-                            /*threshold=default*/ std::nullopt,
+-                            /*deprecated_interval=none*/ std::nullopt},
+-        QuarantineTestParam{/*interval=default*/ std::nullopt,
+-                            /*threshold*/ 5,
+-                            /*deprecated_interval=none*/ std::nullopt},
+-        QuarantineTestParam{/*interval*/ 2s,
+-                            /*threshold=default*/ std::nullopt,
+-                            /*deprecated_interval=none*/ std::nullopt},
+-        // we expect warning about 'using
+-        // unreachable_destination_refresh_interval', it's value should be
+-        // ignored and default should be used
+-        QuarantineTestParam{/*interval=default*/ std::nullopt,
+-                            /*threshold=default*/ std::nullopt,
+-                            /*deprecated_interval*/ 4s}));
+-
+ class RefreshSharedQuarantineOnTTL : public RouterRoutingStrategyTest {};
+ 
+ /**
+@@ -1326,13 +1251,13 @@ TEST_F(RefreshSharedQuarantineOnTTL, RemoveDestination) {
+   auto default_section = get_DEFAULT_defaults();
+   init_keyring(default_section, temp_test_dir.name());
+   const std::chrono::seconds unreachable_dest_refresh_value = ttl * 10;
+-  const std::string destination_status_section =
+-      get_destination_status_section(unreachable_dest_refresh_value, 1);
+-  const std::string conf_file{
+-      create_config_file(temp_test_dir.name(),
+-                         routing_section + metadata_cache_section +
+-                             monitoring_section + destination_status_section,
+-                         &default_section, "test")};
++  const std::string unreachable_dest_refresh =
++      "unreachable_destination_refresh_interval = " +
++      std::to_string(unreachable_dest_refresh_value.count());
++  const std::string conf_file{create_config_file(
++      temp_test_dir.name(),
++      routing_section + metadata_cache_section + monitoring_section,
++      &default_section, "test", unreachable_dest_refresh)};
+ 
+   auto &router{ProcessManager::launch_router({"-c", conf_file}, EXIT_SUCCESS)};
+   ASSERT_NO_FATAL_FAILURE(check_port_ready(router, X_RO_bind_port));
+@@ -1432,13 +1357,13 @@ TEST_F(RefreshSharedQuarantineOnTTL, KeepDestination) {
+   auto default_section = get_DEFAULT_defaults();
+   init_keyring(default_section, temp_test_dir.name());
+   const std::chrono::seconds unreachable_dest_refresh_value = ttl * 10;
+-  const std::string destination_status_section =
+-      get_destination_status_section(unreachable_dest_refresh_value, 1);
+-  const std::string conf_file{
+-      create_config_file(temp_test_dir.name(),
+-                         routing_section + metadata_cache_section +
+-                             monitoring_section + destination_status_section,
+-                         &default_section, "test")};
++  const std::string unreachable_dest_refresh =
++      "unreachable_destination_refresh_interval = " +
++      std::to_string(unreachable_dest_refresh_value.count());
++  const std::string conf_file{create_config_file(
++      temp_test_dir.name(),
++      routing_section + metadata_cache_section + monitoring_section,
++      &default_section, "test", unreachable_dest_refresh)};
+ 
+   auto &router{ProcessManager::launch_router({"-c", conf_file}, EXIT_SUCCESS)};
+ 
+@@ -1464,14 +1389,13 @@ TEST_F(RefreshSharedQuarantineOnTTL, KeepDestination) {
+       {cluster_nodes_ports[0], cluster_nodes_ports[2], cluster_nodes_ports[3]});
+   wait_for_transaction_count_increase(http_port, 2);
+ 
+-  // even though the first RO node is no longer in the metadata it should not
+-  // be removed from the quarantine queue because other plugin still
+-  // references it
+-  EXPECT_THAT(router.get_logfile_content(),
+-              ::testing::Not(::testing::ContainsRegex(
+-                  "Remove '.*" + std::to_string(cluster_nodes_ports[1]) +
+-                  "' from quarantine, no plugin is using this destination "
+-                  "candidate")));
++  // even though the first RO node is no longer in the metadata it should not be
++  // removed from the quarantine queue because other plugin still references it
++  EXPECT_THAT(
++      router.get_logfile_content(),
++      ::testing::Not(::testing::ContainsRegex(
++          "Remove '.*" + std::to_string(cluster_nodes_ports[1]) +
++          "' from quarantine, no plugin is using this destination candidate")));
+ 
+   ASSERT_THAT(router.kill(), testing::Eq(0));
+ }
+@@ -1519,14 +1443,14 @@ TEST_F(RefreshSharedQuarantineOnTTL, instance_in_metadata_but_quarantined) {
+ 
+   auto default_section = get_DEFAULT_defaults();
+   init_keyring(default_section, temp_test_dir.name());
+-  const std::chrono::seconds unreachable_dest_refresh_value{3600};
+-  const std::string destination_status_section =
+-      get_destination_status_section(unreachable_dest_refresh_value, 1);
+-  const std::string conf_file{
+-      create_config_file(temp_test_dir.name(),
+-                         routing_section + metadata_cache_section +
+-                             monitoring_section + destination_status_section,
+-                         &default_section, "test")};
++  const std::chrono::seconds unreachable_dest_refresh_value{65535};
++  const std::string unreachable_dest_refresh =
++      "unreachable_destination_refresh_interval = " +
++      std::to_string(unreachable_dest_refresh_value.count());
++  const std::string conf_file{create_config_file(
++      temp_test_dir.name(),
++      routing_section + metadata_cache_section + monitoring_section,
++      &default_section, "test", unreachable_dest_refresh)};
+ 
+   auto &router{ProcessManager::launch_router({"-c", conf_file}, EXIT_SUCCESS)};
+ 
+@@ -1550,7 +1474,7 @@ TEST_F(RefreshSharedQuarantineOnTTL, instance_in_metadata_but_quarantined) {
+   cluster_nodes[1] =
+       &launch_cluster_node(cluster_nodes_ports[1], get_data_dir().str());
+ 
+-  // Since error_quarantine_interval is very high this will
++  // Since unreachable_destination_refresh_interval is very high this will
+   // be triggered by the ttl.
+   SCOPED_TRACE(
+       "// Instance is quarantined but according to metadata it is available");
+diff --git a/router/tests/helpers/router_component_clusterset.h b/router/tests/helpers/router_component_clusterset.h
+index 9d36ab907e3..f1613508284 100644
+--- a/router/tests/helpers/router_component_clusterset.h
++++ b/router/tests/helpers/router_component_clusterset.h
+@@ -31,6 +31,8 @@
+ #include <thread>
+ 
+ #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
++// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
++// globally and require to include my_rapidjson_size_t.h
+ #include "my_rapidjson_size_t.h"
+ #endif
+ 
+-- 
+2.37.2
+

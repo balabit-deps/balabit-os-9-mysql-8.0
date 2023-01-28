@@ -1,0 +1,82 @@
+From 45c6865258226df8be14cb43089d5872b355177b Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:04:40 -0500
+Subject: [PATCH 22/86] Revert "Bug#34800850 EXPECT/ASSERT for stdx::expected"
+
+This reverts commit f6b902ded5cc97e26b2aad46bf06454181409ff2.
+---
+ router/tests/helpers/stdx_expected_no_error.h | 62 -------------------
+ 1 file changed, 62 deletions(-)
+ delete mode 100644 router/tests/helpers/stdx_expected_no_error.h
+
+diff --git a/router/tests/helpers/stdx_expected_no_error.h b/router/tests/helpers/stdx_expected_no_error.h
+deleted file mode 100644
+index 51f093763c4..00000000000
+--- a/router/tests/helpers/stdx_expected_no_error.h
++++ /dev/null
+@@ -1,62 +0,0 @@
+-/*
+-  Copyright (c) 2022, Oracle and/or its affiliates.
+-
+-  This program is free software; you can redistribute it and/or modify
+-  it under the terms of the GNU General Public License, version 2.0,
+-  as published by the Free Software Foundation.
+-
+-  This program is also distributed with certain software (including
+-  but not limited to OpenSSL) that is licensed under separate terms,
+-  as designated in a particular file or component or in included license
+-  documentation.  The authors of MySQL hereby grant you an additional
+-  permission to link the program and your derivative works with the
+-  separately licensed software that they have included with MySQL.
+-
+-  This program is distributed in the hope that it will be useful,
+-  but WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-  GNU General Public License for more details.
+-
+-  You should have received a copy of the GNU General Public License
+-  along with this program; if not, write to the Free Software
+-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+-*/
+-
+-#ifndef MYSQL_TEST_HELPERS_STDX_EXPECTED_NO_ERROR_H_
+-#define MYSQL_TEST_HELPERS_STDX_EXPECTED_NO_ERROR_H_
+-
+-#include <gtest/gtest.h>
+-
+-#include "mysql/harness/stdx/expected.h"
+-
+-template <class T, class E>
+-::testing::AssertionResult StdxExpectedSuccess(const char *expr,
+-                                               const stdx::expected<T, E> &e) {
+-  if (e) return ::testing::AssertionSuccess();
+-
+-  return ::testing::AssertionFailure() << "Expected: " << expr << " succeeds.\n"
+-                                       << "  Actual: " << e.error() << "\n";
+-}
+-
+-template <class T, class E>
+-::testing::AssertionResult StdxExpectedFailure(const char *expr,
+-                                               const stdx::expected<T, E> &e) {
+-  if (!e) return ::testing::AssertionSuccess();
+-
+-  if constexpr (std::is_void_v<T>) {
+-    return ::testing::AssertionFailure() << "Expected: " << expr << " fails.\n"
+-                                         << "  Actual: succeeded\n";
+-  } else {
+-    return ::testing::AssertionFailure()
+-           << "Expected: " << expr << " fails.\n"
+-           << "  Actual: " << ::testing::PrintToString(e.value()) << "\n";
+-  }
+-}
+-
+-#define EXPECT_NO_ERROR(x) EXPECT_PRED_FORMAT1(StdxExpectedSuccess, (x))
+-#define ASSERT_NO_ERROR(x) ASSERT_PRED_FORMAT1(StdxExpectedSuccess, (x))
+-
+-#define EXPECT_ERROR(x) EXPECT_PRED_FORMAT1(StdxExpectedFailure, (x))
+-#define ASSERT_ERROR(x) ASSERT_PRED_FORMAT1(StdxExpectedFailure, (x))
+-
+-#endif
+-- 
+2.37.2
+

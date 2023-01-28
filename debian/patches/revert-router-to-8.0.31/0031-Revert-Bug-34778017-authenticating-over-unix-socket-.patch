@@ -1,0 +1,339 @@
+From f0091e4325e974250f28ceaf27fea36551807af6 Mon Sep 17 00:00:00 2001
+From: Corey Bryant <corey.bryant@canonical.com>
+Date: Fri, 27 Jan 2023 17:05:50 -0500
+Subject: [PATCH 31/86] Revert "Bug#34778017 authenticating over unix-socket
+ fails"
+
+This reverts commit e31f9f26e26d428a577deb9b0b9d07f652045ccb.
+---
+ .../include/mysqlrouter/connection_base.h     |   2 -
+ .../src/routing/src/basic_protocol_splicer.h  |  27 ----
+ .../routing/src/classic_auth_caching_sha2.cc  |  12 +-
+ router/src/routing/tests/mysql_client.h       |  18 +--
+ .../tests/integration/test_routing_direct.cc  | 137 ++----------------
+ 5 files changed, 22 insertions(+), 174 deletions(-)
+
+diff --git a/router/src/connection_pool/include/mysqlrouter/connection_base.h b/router/src/connection_pool/include/mysqlrouter/connection_base.h
+index 2e06e12666f..f3b04fb416e 100644
+--- a/router/src/connection_pool/include/mysqlrouter/connection_base.h
++++ b/router/src/connection_pool/include/mysqlrouter/connection_base.h
+@@ -71,8 +71,6 @@ class ConnectionBase {
+ 
+   [[nodiscard]] virtual stdx::expected<void, std::error_code> cancel() = 0;
+ 
+-  [[nodiscard]] virtual bool is_secure_transport() const = 0;
+-
+   [[nodiscard]] virtual stdx::expected<void, std::error_code> set_io_context(
+       net::io_context &new_ctx) = 0;
+ };
+diff --git a/router/src/routing/src/basic_protocol_splicer.h b/router/src/routing/src/basic_protocol_splicer.h
+index 1bb2c1a0b4a..b2c58e8e46b 100644
+--- a/router/src/routing/src/basic_protocol_splicer.h
++++ b/router/src/routing/src/basic_protocol_splicer.h
+@@ -103,14 +103,6 @@ class RoutingConnectionBase {
+       BlockedEndpoints &blocked_endpoints) = 0;
+ };
+ 
+-template <class Protocol>
+-struct IsTransportSecure : std::false_type {};
+-
+-#ifdef NET_TS_HAS_UNIX_SOCKET
+-template <>
+-struct IsTransportSecure<local::stream_protocol> : std::true_type {};
+-#endif
+-
+ /**
+  * basic connection which wraps a net-ts Protocol.
+  *
+@@ -270,15 +262,6 @@ class BasicConnection : public ConnectionBase {
+     return sock_.get_option(opt);
+   }
+ 
+-  /**
+-   * check if the underlying transport is secure.
+-   *
+-   * - unix-socket, shared-memory, ... are secure.
+-   */
+-  [[nodiscard]] bool is_secure_transport() const override {
+-    return IsTransportSecure<Protocol>::value;
+-  }
+-
+  protected:
+   socket_type sock_;
+   endpoint_type ep_;
+@@ -453,16 +436,6 @@ class TlsSwitchableConnection {
+ 
+   std::unique_ptr<ConnectionBase> &connection() { return conn_; }
+ 
+-  /**
+-   * check if the channel is secure.
+-   *
+-   * - if TLS is enabled, it the transport is secure
+-   * - if transport is secure, the channel is secure
+-   */
+-  [[nodiscard]] bool is_secure_transport() const {
+-    return conn_->is_secure_transport() || channel_->ssl();
+-  }
+-
+  private:
+   // tcp/unix-socket
+   std::unique_ptr<ConnectionBase> conn_;
+diff --git a/router/src/routing/src/classic_auth_caching_sha2.cc b/router/src/routing/src/classic_auth_caching_sha2.cc
+index 605c415371d..5c597966cba 100644
+--- a/router/src/routing/src/classic_auth_caching_sha2.cc
++++ b/router/src/routing/src/classic_auth_caching_sha2.cc
+@@ -148,7 +148,7 @@ AuthCachingSha2Sender::send_password() {
+   auto dst_channel = socket_splicer->server_channel();
+   auto dst_protocol = connection()->server_protocol();
+ 
+-  if (socket_splicer->server_conn().is_secure_transport()) {
++  if (dst_channel->ssl()) {
+     trace(Tracer::Event().stage("caching_sha2::sender::plaintext_password"));
+     auto send_res = ClassicFrame::send_msg<
+         classic_protocol::message::client::AuthMethodData>(
+@@ -394,7 +394,7 @@ AuthCachingSha2Forwarder::client_data() {
+       // client requested a public key, but router has no ssl-ctx
+       // (client-ssl-mode is DISABLED|PASSTHROUGH)
+       //
+-      // If the server-connection is secure, the server will treat the
++      // If the server-connection is encrypted, the server will treat the
+       // public-key-request as an invalid password
+       // (as it isn't terminated by \0)
+       stage(Stage::PublicKeyResponse);
+@@ -457,7 +457,7 @@ AuthCachingSha2Forwarder::plaintext_password() {
+           src_channel, src_protocol);
+   if (!msg_res) return recv_client_failed(msg_res.error());
+ 
+-  if (socket_splicer->client_conn().is_secure_transport()) {
++  if (src_channel->ssl()) {
+     trace(Tracer::Event().stage("caching_sha2::forward::plaintext_password"));
+ 
+     // remove trailing null
+@@ -533,8 +533,8 @@ AuthCachingSha2Forwarder::send_password() {
+   auto dst_channel = socket_splicer->server_channel();
+   auto dst_protocol = connection()->server_protocol();
+ 
+-  if (socket_splicer->server_conn().is_secure_transport()) {
+-    // the server-side is secure: send plaintext password
++  if (dst_channel->ssl()) {
++    // the server-side is encrypted: send plaintext password
+     trace(Tracer::Event().stage("caching_sha2::forward::plaintext_password"));
+ 
+     stage(Stage::Response);
+@@ -543,7 +543,7 @@ AuthCachingSha2Forwarder::send_password() {
+         dst_channel, dst_protocol, src_protocol->password().value());
+     if (!send_res) return send_server_failed(send_res.error());
+   } else {
+-    // the server is NOT secure: ask for the server's publickey
++    // the server is NOT encrypted: ask for the server's publickey
+     trace(Tracer::Event().stage("caching_sha2::forward::public_key_request"));
+ 
+     stage(Stage::PublicKeyResponse);
+diff --git a/router/src/routing/tests/mysql_client.h b/router/src/routing/tests/mysql_client.h
+index 0e7559a4d46..7745b510ef1 100644
+--- a/router/src/routing/tests/mysql_client.h
++++ b/router/src/routing/tests/mysql_client.h
+@@ -421,10 +421,7 @@ class MysqlClient {
+ 
+   void flags(unsigned long f) { flags_ = f; }
+ 
+-  // tag class for unix-socket connections
+-  struct unix_socket_t {};
+-
+-  stdx::expected<void, MysqlError> connect(const std::string &hostname,
++  stdx::expected<void, MysqlError> connect(std::string hostname,
+                                            uint16_t port = 3306) {
+     const auto r = mysql_real_connect(
+         m_.get(), hostname.c_str(), username_.c_str(), password_.c_str(),
+@@ -437,19 +434,6 @@ class MysqlClient {
+     return {};
+   }
+ 
+-  stdx::expected<void, MysqlError> connect(unix_socket_t,
+-                                           const std::string &path) {
+-    const auto r = mysql_real_connect(
+-        m_.get(), "localhost", username_.c_str(), password_.c_str(),
+-        initial_schema_.c_str(), 0, path.c_str(), flags_);
+-
+-    if (r == nullptr) {
+-      return stdx::make_unexpected(make_mysql_error_code(m_.get()));
+-    }
+-
+-    return {};
+-  }
+-
+   stdx::expected<void, MysqlError> reset_connection() {
+     const auto r = mysql_reset_connection(m_.get());
+ 
+diff --git a/router/tests/integration/test_routing_direct.cc b/router/tests/integration/test_routing_direct.cc
+index c53b3c8d74f..00abd823659 100644
+--- a/router/tests/integration/test_routing_direct.cc
++++ b/router/tests/integration/test_routing_direct.cc
+@@ -959,21 +959,21 @@ class SharedRouter {
+               ? (ports_[port_key] = port_pool_.get_next_available())
+               : ports_it->second;
+ 
+-      writer.section("routing:classic_" + param.testname, {
+-        {"bind_port", std::to_string(port)},
+-#if !defined(_WIN32)
+-            {"socket", socket_path(param)},
+-#endif
+-            {"destinations", mysql_harness::join(destinations, ",")},
+-            {"protocol", "classic"}, {"routing_strategy", "round-robin"},
+-
+-            {"client_ssl_mode", std::string(param.client_ssl_mode)},
+-            {"server_ssl_mode", std::string(param.server_ssl_mode)},
+-
+-            {"client_ssl_key", SSL_TEST_DATA_DIR "/server-key-sha512.pem"},
+-            {"client_ssl_cert", SSL_TEST_DATA_DIR "/server-cert-sha512.pem"},
+-            {"connection_sharing", "0"},
+-      });
++      writer.section(
++          "routing:classic_" + param.testname,
++          {
++              {"bind_port", std::to_string(port)},
++              {"destinations", mysql_harness::join(destinations, ",")},
++              {"protocol", "classic"},
++              {"routing_strategy", "round-robin"},
++
++              {"client_ssl_mode", std::string(param.client_ssl_mode)},
++              {"server_ssl_mode", std::string(param.server_ssl_mode)},
++
++              {"client_ssl_key", SSL_TEST_DATA_DIR "/server-key-sha512.pem"},
++              {"client_ssl_cert", SSL_TEST_DATA_DIR "/server-cert-sha512.pem"},
++              {"connection_sharing", "0"},
++          });
+     }
+ 
+     auto bindir = process_manager().get_origin();
+@@ -1001,13 +1001,6 @@ class SharedRouter {
+         std::make_tuple(param.client_ssl_mode, param.server_ssl_mode));
+   }
+ 
+-  [[nodiscard]] std::string socket_path(const ConnectionParam &param) const {
+-    return Path(conf_dir_.name())
+-        .join("classic_"s + std::string(param.client_ssl_mode) + "_" +
+-              std::string(param.server_ssl_mode) + ".sock")
+-        .str();
+-  }
+-
+   [[nodiscard]] auto rest_port() const { return rest_port_; }
+   [[nodiscard]] auto rest_user() const { return rest_user_; }
+   [[nodiscard]] auto rest_pass() const { return rest_pass_; }
+@@ -1448,56 +1441,6 @@ TEST_P(ConnectionTest, classic_protocol_change_user_native) {
+   }
+ }
+ 
+-#if !defined(_WIN32)
+-TEST_P(ConnectionTest, classic_protocol_native_over_socket) {
+-  SCOPED_TRACE("// connecting to server");
+-  MysqlClient cli;
+-
+-  auto account = SharedServer::native_password_account();
+-  cli.username(account.username);
+-  cli.password(account.password);
+-
+-  if (GetParam().client_ssl_mode == kRequired) {
+-    cli.set_option(MysqlClient::SslMode(SSL_MODE_REQUIRED));
+-  }
+-
+-  auto connect_res = cli.connect(MysqlClient::unix_socket_t{},
+-                                 shared_router()->socket_path(GetParam()));
+-  ASSERT_NO_ERROR(connect_res);
+-
+-  auto cmd_res = query_one_result(cli, "SELECT USER(), SCHEMA()");
+-  ASSERT_NO_ERROR(cmd_res);
+-
+-  EXPECT_THAT(*cmd_res, ElementsAre(ElementsAre(account.username + "@localhost",
+-                                                "<NULL>")));
+-}
+-
+-TEST_P(ConnectionTest, classic_protocol_change_user_native_over_socket) {
+-  SCOPED_TRACE("// connecting to server");
+-  MysqlClient cli;
+-
+-  cli.username("root");
+-  cli.password("");
+-
+-  if (GetParam().client_ssl_mode == kRequired) {
+-    cli.set_option(MysqlClient::SslMode(SSL_MODE_REQUIRED));
+-  }
+-
+-  auto connect_res = cli.connect(MysqlClient::unix_socket_t{},
+-                                 shared_router()->socket_path(GetParam()));
+-  ASSERT_NO_ERROR(connect_res);
+-
+-  auto account = SharedServer::native_password_account();
+-  ASSERT_NO_ERROR(cli.change_user(account.username, account.password, ""));
+-
+-  auto cmd_res = query_one_result(cli, "SELECT USER(), SCHEMA()");
+-  ASSERT_NO_ERROR(cmd_res);
+-
+-  EXPECT_THAT(*cmd_res, ElementsAre(ElementsAre(account.username + "@localhost",
+-                                                "<NULL>")));
+-}
+-#endif
+-
+ TEST_P(ConnectionTest, classic_protocol_change_user_caching_sha2_empty) {
+   SCOPED_TRACE("// connecting to server");
+   MysqlClient cli;
+@@ -1560,56 +1503,6 @@ TEST_P(ConnectionTest, classic_protocol_change_user_caching_sha2) {
+   }
+ }
+ 
+-#if !defined(_WIN32)
+-TEST_P(ConnectionTest, classic_protocol_caching_sha2_over_socket) {
+-  SCOPED_TRACE("// connecting to server");
+-  MysqlClient cli;
+-
+-  auto account = SharedServer::caching_sha2_password_account();
+-  cli.username(account.username);
+-  cli.password(account.password);
+-
+-  if (GetParam().client_ssl_mode == kRequired) {
+-    cli.set_option(MysqlClient::SslMode(SSL_MODE_REQUIRED));
+-  }
+-
+-  auto connect_res = cli.connect(MysqlClient::unix_socket_t{},
+-                                 shared_router()->socket_path(GetParam()));
+-  ASSERT_NO_ERROR(connect_res);
+-
+-  auto cmd_res = query_one_result(cli, "SELECT USER(), SCHEMA()");
+-  ASSERT_NO_ERROR(cmd_res);
+-
+-  EXPECT_THAT(*cmd_res, ElementsAre(ElementsAre(account.username + "@localhost",
+-                                                "<NULL>")));
+-}
+-
+-TEST_P(ConnectionTest, classic_protocol_change_user_caching_sha2_over_socket) {
+-  SCOPED_TRACE("// connecting to server");
+-  MysqlClient cli;
+-
+-  cli.username("root");
+-  cli.password("");
+-
+-  if (GetParam().client_ssl_mode == kRequired) {
+-    cli.set_option(MysqlClient::SslMode(SSL_MODE_REQUIRED));
+-  }
+-
+-  auto connect_res = cli.connect(MysqlClient::unix_socket_t{},
+-                                 shared_router()->socket_path(GetParam()));
+-  ASSERT_NO_ERROR(connect_res);
+-
+-  auto account = SharedServer::caching_sha2_password_account();
+-  ASSERT_NO_ERROR(cli.change_user(account.username, account.password, ""));
+-
+-  auto cmd_res = query_one_result(cli, "SELECT USER(), SCHEMA()");
+-  ASSERT_NO_ERROR(cmd_res);
+-
+-  EXPECT_THAT(*cmd_res, ElementsAre(ElementsAre(account.username + "@localhost",
+-                                                "<NULL>")));
+-}
+-#endif
+-
+ TEST_P(ConnectionTest, classic_protocol_change_user_caching_sha2_with_schema) {
+   SCOPED_TRACE("// connecting to server");
+   MysqlClient cli;
+-- 
+2.37.2
+

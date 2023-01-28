@@ -243,7 +243,7 @@ class JOIN {
      This is the bitmap of all tables which are dependencies of
      lateral derived tables which are not (yet) part of the partial
      plan.  (The value is a logical 'or' of zero or more
-     TABLE_LIST.map() values.)
+     Table_ref.map() values.)
 
      When we are building the join order, there is a partial plan (an
      ordered sequence of JOIN_TABs), and an unordered set of JOIN_TABs
@@ -505,7 +505,7 @@ class JOIN {
     optimization. May be changed (to NULL) only if optimize_aggregated_query()
     optimizes tables away.
   */
-  TABLE_LIST *tables_list;
+  Table_ref *tables_list;
   COND_EQUAL *cond_equal{nullptr};
   /*
     Join tab to return to. Points to an element of join->join_tab array, or to
@@ -609,6 +609,13 @@ class JOIN {
   */
   bool plan_is_single_table() { return primary_tables - const_tables == 1; }
 
+  /**
+    Returns true if any of the items in JOIN::fields contains a call to the
+    full-text search function MATCH, which is not wrapped in an aggregation
+    function.
+  */
+  bool contains_non_aggregated_fts() const;
+
   bool optimize(bool finalize_access_paths);
   void reset();
   bool prepare_result();
@@ -670,7 +677,7 @@ class JOIN {
   mem_root_deque<Item *> *get_current_fields();
 
   bool optimize_rollup();
-  bool finalize_table_conditions();
+  bool finalize_table_conditions(THD *thd);
   /**
     Release memory and, if possible, the open tables held by this execution
     plan (and nested plans). It's used to release some tables before
@@ -684,6 +691,7 @@ class JOIN {
   bool clear_fields(table_map *save_nullinfo);
   void restore_fields(table_map save_nullinfo);
 
+ private:
   /**
     Return whether the caller should send a row even if the join
     produced no rows if:
@@ -700,6 +708,7 @@ class JOIN {
             query_block->having_value != Item::COND_FALSE);
   }
 
+ public:
   bool generate_derived_keys();
   void finalize_derived_keys();
   bool get_best_combination();
@@ -854,6 +863,33 @@ class JOIN {
   */
   bool optimize_fts_query();
 
+  /**
+    Checks if the chosen plan suffers from a problem related to full-text search
+    and streaming aggregation, which is likely to cause wrong results or make
+    the query misbehave in other ways, and raises an error if so. Only to be
+    called for queries with full-text search and GROUP BY WITH ROLLUP.
+
+    If there are calls to MATCH in the SELECT list (including the hidden
+    elements lifted there from other clauses), and they are not inside an
+    aggregate function, the results of the MATCH clause need to be materialized
+    before streaming aggregation is performed. The hypergraph optimizer adds a
+    materialization step before aggregation if needed (see
+    CreateStreamingAggregationPath()), but the old optimizer only does that for
+    implicitly grouped queries. For explicitly grouped queries, it instead
+    disables streaming aggregation for the queries that would need a
+    materialization step to work correctly (see JOIN::test_skip_sort()).
+
+    For explicitly grouped queries WITH ROLLUP, however, streaming aggregation
+    is currently the only alternative. In many cases it still works correctly
+    because an intermediate materialization step has been added for some other
+    reason, typically for a sort. For now, in those cases where a
+    materialization step has not been added, we raise an error instead of going
+    ahead with an invalid execution plan.
+
+    @return true if an error was raised.
+  */
+  bool check_access_path_with_fts() const;
+
   bool prune_table_partitions();
   /**
     Initialize key dependencies for join tables.
@@ -995,6 +1031,7 @@ class JOIN {
    */
   void create_access_paths();
 
+ public:
   /**
     Create access paths with the knowledge that there are going to be zero rows
     coming from tables (before aggregation); typically because we know that
@@ -1004,6 +1041,7 @@ class JOIN {
    */
   void create_access_paths_for_zero_rows();
 
+ private:
   void create_access_paths_for_index_subquery();
 
   /** @{ Helpers for create_access_paths. */
@@ -1057,14 +1095,14 @@ bool uses_index_fields_only(Item *item, TABLE *tbl, uint keyno,
 bool remove_eq_conds(THD *thd, Item *cond, Item **retcond,
                      Item::cond_result *cond_value);
 bool optimize_cond(THD *thd, Item **conds, COND_EQUAL **cond_equal,
-                   mem_root_deque<TABLE_LIST *> *join_list,
+                   mem_root_deque<Table_ref *> *join_list,
                    Item::cond_result *cond_value);
 Item *substitute_for_best_equal_field(THD *thd, Item *cond,
                                       COND_EQUAL *cond_equal,
                                       JOIN_TAB **table_join_idx);
 bool build_equal_items(THD *thd, Item *cond, Item **retcond,
                        COND_EQUAL *inherited, bool do_inherit,
-                       mem_root_deque<TABLE_LIST *> *join_list,
+                       mem_root_deque<Table_ref *> *join_list,
                        COND_EQUAL **cond_equal_ref);
 bool is_indexed_agg_distinct(JOIN *join,
                              mem_root_deque<Item_field *> *out_args);
@@ -1074,7 +1112,7 @@ Key_use_array *create_keyuse_for_table(
 Item_field *get_best_field(Item_field *item_field, COND_EQUAL *cond_equal);
 Item *make_cond_for_table(THD *thd, Item *cond, table_map tables,
                           table_map used_table, bool exclude_expensive_cond);
-uint build_bitmap_for_nested_joins(mem_root_deque<TABLE_LIST *> *join_list,
+uint build_bitmap_for_nested_joins(mem_root_deque<Table_ref *> *join_list,
                                    uint first_unused);
 
 /**
@@ -1198,7 +1236,38 @@ double find_worst_seeks(const TABLE *table, double num_rows,
   comparison in all cases, ie., one can remove any further checks on
   field = right_item. If not, there may be false positives, and one
   needs to keep the comparison after the ref lookup.
+
+  @param thd            thread handler
+  @param field          field that is looked up through an index
+  @param right_item     value used to perform look up
+  @param[out] subsumes  true if an exact comparison can be done, false otherwise
+
+  @returns false if success, true if error
  */
-bool ref_lookup_subsumes_comparison(Field *field, Item *right_item);
+bool ref_lookup_subsumes_comparison(THD *thd, Field *field, Item *right_item,
+                                    bool *subsumes);
+
+/**
+  Checks if we need to create iterators for this query. We usually have to. The
+  exception is if a secondary engine is used, and that engine will offload the
+  query execution to an external executor using #JOIN::override_executor_func.
+  In this case, the external executor will use its own execution structures and
+  we don't need to bother with creating the iterators needed by the MySQL
+  executor.
+ */
+bool IteratorsAreNeeded(const THD *thd, AccessPath *root_path);
+
+/**
+  Estimates the number of base table row accesses that will be performed when
+  executing a query using the given plan.
+
+  @param path The access path representing the plan.
+  @param num_evaluations The number of times this path is expected to be
+  evaluated during a single execution of the query.
+  @param limit The maximum number of rows expected to be read from this path.
+  @return An estimate of the number of row accesses.
+ */
+double EstimateRowAccesses(const AccessPath *path, double num_evaluations,
+                           double limit);
 
 #endif /* SQL_OPTIMIZER_INCLUDED */

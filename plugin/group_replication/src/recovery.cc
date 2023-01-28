@@ -163,8 +163,7 @@ void Recovery_module::leave_group_on_recovery_failure() {
   leave_group_on_failure::mask leave_actions;
   leave_actions.set(leave_group_on_failure::HANDLE_EXIT_STATE_ACTION, true);
   leave_group_on_failure::leave(leave_actions, ER_GRP_RPL_FATAL_REC_PROCESS,
-                                PSESSION_USE_THREAD, nullptr,
-                                exit_state_action_abort_log_message);
+                                nullptr, exit_state_action_abort_log_message);
 }
 
 /*
@@ -173,7 +172,7 @@ void Recovery_module::leave_group_on_recovery_failure() {
   * Step 0: Declare recovery running after extracting group information
 
   * Step 1: Wait for the applier to execute pending transactions and suspend.
-    Even if the joiner is alone, it goes trough this phase so it is declared
+    Even if the joiner is alone, it goes through this phase so it is declared
     ONLINE only when it executed all pending local transactions.
 
   * Step 2: Declare the node ONLINE if alone.
@@ -289,7 +288,9 @@ int Recovery_module::recovery_thread_handle() {
 
 #ifndef NDEBUG
   DBUG_EXECUTE_IF("recovery_thread_wait_before_finish", {
-    const char act[] = "now wait_for signal.recovery_end";
+    const char act[] =
+        "now signal signal.recovery_thread_wait_before_finish_reached "
+        "wait_for signal.recovery_end";
     assert(!debug_sync_set_action(current_thd, STRING_WITH_LEN(act)));
   });
 #endif  // NDEBUG
@@ -301,6 +302,14 @@ int Recovery_module::recovery_thread_handle() {
 single_member_online:
 
   /* Step 4 */
+  if (!recovery_aborted && !error) {
+    /*
+      Recovery through `group_replication_recovery` is complete,
+      enable the guarantee that the binlog commit order will
+      follow the order instructed by GR.
+    */
+    Commit_stage_manager::enable_manual_session_tickets();
+  }
 
   /**
     If recovery fails or is aborted, it never makes sense to awake the applier,

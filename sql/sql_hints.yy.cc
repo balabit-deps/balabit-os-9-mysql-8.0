@@ -68,7 +68,7 @@
 
 
 /* Copy the first part of user declarations.  */
-#line 28 "sql_hints.yy" /* yacc.c:339  */
+#line 28 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:339  */
 
 #include <assert.h>
 #include <climits>
@@ -77,6 +77,7 @@
 #include "lex_string.h"
 #include "m_string.h"
 
+#include "my_double2ulonglong.h"
 #include "my_inttypes.h"  // TODO: replace with cstdint
 #include "mysqld_error.h"
 #include "sql/derror.h"
@@ -104,7 +105,7 @@ static bool parse_int(longlong *to, const char *from, size_t from_length)
 }
 
 
-#line 108 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:339  */
+#line 109 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:339  */
 
 # ifndef YY_NULLPTR
 #  if defined __cplusplus && 201103L <= __cplusplus
@@ -124,8 +125,8 @@ static bool parse_int(longlong *to, const char *from, size_t from_length)
 
 /* In a future release of Bison, this section will be replaced
    by #include "sql_hints.yy.h".  */
-#ifndef YY_HINT_PARSER_VAR_LIB_PB2_SB_1_7663233_1657143500_24_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED
-# define YY_HINT_PARSER_VAR_LIB_PB2_SB_1_7663233_1657143500_24_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED
+#ifndef YY_HINT_PARSER_VAR_LIB_PB2_SB_1_9698527_1671205045_47_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED
+# define YY_HINT_PARSER_VAR_LIB_PB2_SB_1_9698527_1671205045_47_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -251,11 +252,11 @@ extern int HINT_PARSER_debug;
 
 int HINT_PARSER_parse (class THD *thd, class Hint_scanner *scanner, class PT_hint_list **ret);
 
-#endif /* !YY_HINT_PARSER_VAR_LIB_PB2_SB_1_7663233_1657143500_24_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED  */
+#endif /* !YY_HINT_PARSER_VAR_LIB_PB2_SB_1_9698527_1671205045_47_DIST_GPL_SQL_SQL_HINTS_YY_H_INCLUDED  */
 
 /* Copy the second part of user declarations.  */
 
-#line 259 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:358  */
+#line 260 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:358  */
 
 #ifdef short
 # undef short
@@ -642,16 +643,16 @@ static const yytype_uint8 yytranslate[] =
   /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
 static const yytype_uint16 yyrline[] =
 {
-       0,   205,   205,   207,   209,   214,   220,   228,   229,   230,
-     231,   232,   233,   234,   239,   259,   260,   264,   270,   279,
-     280,   284,   290,   299,   300,   304,   310,   319,   323,   331,
-     339,   340,   348,   349,   353,   360,   367,   374,   381,   388,
-     395,   402,   409,   416,   425,   426,   430,   437,   438,   439,
-     440,   444,   446,   451,   457,   464,   470,   480,   487,   497,
-     501,   505,   509,   513,   520,   524,   528,   532,   536,   543,
-     547,   551,   555,   559,   563,   567,   571,   578,   582,   586,
-     590,   594,   598,   602,   606,   613,   622,   631,   643,   644,
-     648,   663,   667,   702,   703,   707,   715,   716
+       0,   206,   206,   208,   210,   215,   221,   229,   230,   231,
+     232,   233,   234,   235,   240,   260,   261,   265,   271,   280,
+     281,   285,   291,   300,   301,   305,   311,   320,   324,   332,
+     340,   341,   349,   350,   354,   361,   368,   375,   382,   389,
+     396,   403,   410,   417,   426,   427,   431,   438,   439,   440,
+     441,   445,   447,   452,   458,   465,   471,   481,   488,   498,
+     502,   506,   510,   514,   521,   525,   529,   533,   537,   544,
+     548,   552,   556,   560,   564,   568,   572,   579,   583,   587,
+     591,   595,   599,   603,   607,   614,   623,   632,   644,   645,
+     649,   664,   668,   703,   704,   708,   716,   717
 };
 #endif
 
@@ -1571,44 +1572,44 @@ yyreduce:
   switch (yyn)
     {
         case 2:
-#line 206 "sql_hints.yy" /* yacc.c:1646  */
+#line 207 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { *ret= (yyvsp[-1].hint_list); }
-#line 1577 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1578 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 3:
-#line 208 "sql_hints.yy" /* yacc.c:1646  */
+#line 209 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { *ret= (yyvsp[-2].hint_list); }
-#line 1583 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1584 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 4:
-#line 210 "sql_hints.yy" /* yacc.c:1646  */
+#line 211 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { *ret= NULL; }
-#line 1589 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1590 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 5:
-#line 215 "sql_hints.yy" /* yacc.c:1646  */
+#line 216 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_list)= NEW_PTN PT_hint_list(thd->mem_root);
             if ((yyval.hint_list) == NULL || (yyval.hint_list)->push_back((yyvsp[0].hint)))
               YYABORT; // OOM
           }
-#line 1599 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1600 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 6:
-#line 221 "sql_hints.yy" /* yacc.c:1646  */
+#line 222 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyvsp[-1].hint_list)->push_back((yyvsp[0].hint));
             (yyval.hint_list)= (yyvsp[-1].hint_list);
           }
-#line 1608 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1609 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 14:
-#line 240 "sql_hints.yy" /* yacc.c:1646  */
+#line 241 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             longlong n;
             if (parse_int(&n, (yyvsp[-1].lexer.hint_string).str, (yyvsp[-1].lexer.hint_string).length) || n > UINT_MAX32)
@@ -1624,569 +1625,569 @@ yyreduce:
                 YYABORT; // OOM
             }
           }
-#line 1628 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1629 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 15:
-#line 259 "sql_hints.yy" /* yacc.c:1646  */
+#line 260 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.hint_param_table_list).init(thd->mem_root); }
-#line 1634 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1635 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 17:
-#line 265 "sql_hints.yy" /* yacc.c:1646  */
+#line 266 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_table_list).init(thd->mem_root);
             if ((yyval.hint_param_table_list).push_back((yyvsp[0].hint_param_table)))
               YYABORT; // OOM
           }
-#line 1644 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1645 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 18:
-#line 271 "sql_hints.yy" /* yacc.c:1646  */
+#line 272 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             if ((yyvsp[-2].hint_param_table_list).push_back((yyvsp[0].hint_param_table)))
               YYABORT; // OOM
             (yyval.hint_param_table_list)= (yyvsp[-2].hint_param_table_list);
           }
-#line 1654 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1655 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 19:
-#line 279 "sql_hints.yy" /* yacc.c:1646  */
+#line 280 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.hint_param_table_list).init(thd->mem_root); }
-#line 1660 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1661 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 21:
-#line 285 "sql_hints.yy" /* yacc.c:1646  */
+#line 286 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_table_list).init(thd->mem_root);
             if ((yyval.hint_param_table_list).push_back((yyvsp[0].hint_param_table)))
               YYABORT; // OOM
           }
-#line 1670 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1671 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 22:
-#line 291 "sql_hints.yy" /* yacc.c:1646  */
+#line 292 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             if ((yyvsp[-2].hint_param_table_list).push_back((yyvsp[0].hint_param_table)))
               YYABORT; // OOM
             (yyval.hint_param_table_list)= (yyvsp[-2].hint_param_table_list);
           }
-#line 1680 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1681 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 23:
-#line 299 "sql_hints.yy" /* yacc.c:1646  */
+#line 300 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.hint_param_index_list).init(thd->mem_root); }
-#line 1686 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1687 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 25:
-#line 305 "sql_hints.yy" /* yacc.c:1646  */
+#line 306 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_index_list).init(thd->mem_root);
             if ((yyval.hint_param_index_list).push_back((yyvsp[0].lexer.hint_string)))
               YYABORT; // OOM
           }
-#line 1696 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1697 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 26:
-#line 311 "sql_hints.yy" /* yacc.c:1646  */
+#line 312 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             if ((yyvsp[-2].hint_param_index_list).push_back((yyvsp[0].lexer.hint_string)))
               YYABORT; // OOM
             (yyval.hint_param_index_list)= (yyvsp[-2].hint_param_index_list);
           }
-#line 1706 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1707 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 28:
-#line 324 "sql_hints.yy" /* yacc.c:1646  */
+#line 325 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_table).table= (yyvsp[0].lexer.hint_string);
             (yyval.hint_param_table).opt_query_block= NULL_CSTR;
           }
-#line 1715 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1716 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 29:
-#line 332 "sql_hints.yy" /* yacc.c:1646  */
+#line 333 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_table).table= (yyvsp[-1].lexer.hint_string);
             (yyval.hint_param_table).opt_query_block= (yyvsp[0].lexer.hint_string);
           }
-#line 1724 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1725 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 31:
-#line 341 "sql_hints.yy" /* yacc.c:1646  */
+#line 342 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_param_table).table= (yyvsp[0].lexer.hint_string);
             (yyval.hint_param_table).opt_query_block= (yyvsp[-1].lexer.hint_string);
           }
-#line 1733 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1734 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 32:
-#line 348 "sql_hints.yy" /* yacc.c:1646  */
+#line 349 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.lexer.hint_string)= NULL_CSTR; }
-#line 1739 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1740 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 34:
-#line 354 "sql_hints.yy" /* yacc.c:1646  */
+#line 355 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), true, SEMIJOIN_HINT_ENUM, (yyvsp[-1].ulong_num));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1749 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1750 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 35:
-#line 361 "sql_hints.yy" /* yacc.c:1646  */
+#line 362 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), false, SEMIJOIN_HINT_ENUM, (yyvsp[-1].ulong_num));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1759 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1760 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 36:
-#line 368 "sql_hints.yy" /* yacc.c:1646  */
+#line 369 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), true, SUBQUERY_HINT_ENUM, (yyvsp[-1].ulong_num));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1769 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1770 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 37:
-#line 375 "sql_hints.yy" /* yacc.c:1646  */
+#line 376 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, JOIN_PREFIX_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1779 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1780 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 38:
-#line 382 "sql_hints.yy" /* yacc.c:1646  */
+#line 383 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), true, JOIN_PREFIX_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1789 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1790 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 39:
-#line 389 "sql_hints.yy" /* yacc.c:1646  */
+#line 390 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, JOIN_SUFFIX_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1799 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1800 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 40:
-#line 396 "sql_hints.yy" /* yacc.c:1646  */
+#line 397 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), true, JOIN_SUFFIX_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1809 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1810 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 41:
-#line 403 "sql_hints.yy" /* yacc.c:1646  */
+#line 404 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint(NULL_CSTR, true, JOIN_ORDER_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1819 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1820 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 42:
-#line 410 "sql_hints.yy" /* yacc.c:1646  */
+#line 411 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-2].lexer.hint_string), true, JOIN_ORDER_HINT_ENUM, (yyvsp[-1].hint_param_table_list));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1829 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1830 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 43:
-#line 417 "sql_hints.yy" /* yacc.c:1646  */
+#line 418 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_qb_level_hint((yyvsp[-1].lexer.hint_string), true, JOIN_FIXED_ORDER_HINT_ENUM, 0);
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1839 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1840 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 44:
-#line 425 "sql_hints.yy" /* yacc.c:1646  */
+#line 426 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= 0; }
-#line 1845 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1846 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 45:
-#line 427 "sql_hints.yy" /* yacc.c:1646  */
+#line 428 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.ulong_num)= (yyvsp[0].ulong_num);
           }
-#line 1853 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1854 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 46:
-#line 431 "sql_hints.yy" /* yacc.c:1646  */
+#line 432 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.ulong_num)= (yyvsp[-2].ulong_num) | (yyvsp[0].ulong_num);
           }
-#line 1861 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1862 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 47:
-#line 437 "sql_hints.yy" /* yacc.c:1646  */
+#line 438 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= OPTIMIZER_SWITCH_FIRSTMATCH; }
-#line 1867 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1868 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 48:
-#line 438 "sql_hints.yy" /* yacc.c:1646  */
+#line 439 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= OPTIMIZER_SWITCH_LOOSE_SCAN; }
-#line 1873 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1874 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 49:
-#line 439 "sql_hints.yy" /* yacc.c:1646  */
+#line 440 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= OPTIMIZER_SWITCH_MATERIALIZATION; }
-#line 1879 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1880 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 50:
-#line 440 "sql_hints.yy" /* yacc.c:1646  */
+#line 441 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= OPTIMIZER_SWITCH_DUPSWEEDOUT; }
-#line 1885 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1886 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 51:
-#line 444 "sql_hints.yy" /* yacc.c:1646  */
+#line 445 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)=
                                    static_cast<long>(Subquery_strategy::SUBQ_MATERIALIZATION); }
-#line 1892 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1893 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 52:
-#line 446 "sql_hints.yy" /* yacc.c:1646  */
+#line 447 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     { (yyval.ulong_num)= static_cast<long>(Subquery_strategy::SUBQ_EXISTS); }
-#line 1898 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1899 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 53:
-#line 452 "sql_hints.yy" /* yacc.c:1646  */
+#line 453 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_table_level_hint(NULL_CSTR, (yyvsp[-1].hint_param_table_list), true, (yyvsp[-3].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1908 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1909 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 54:
-#line 459 "sql_hints.yy" /* yacc.c:1646  */
+#line 460 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_table_level_hint((yyvsp[-2].lexer.hint_string), (yyvsp[-1].hint_param_table_list), true, (yyvsp[-4].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1918 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1919 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 55:
-#line 465 "sql_hints.yy" /* yacc.c:1646  */
+#line 466 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_table_level_hint(NULL_CSTR, (yyvsp[-1].hint_param_table_list), false, (yyvsp[-3].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1928 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1929 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 56:
-#line 472 "sql_hints.yy" /* yacc.c:1646  */
+#line 473 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_table_level_hint((yyvsp[-2].lexer.hint_string), (yyvsp[-1].hint_param_table_list), false, (yyvsp[-4].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1938 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1939 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 57:
-#line 482 "sql_hints.yy" /* yacc.c:1646  */
+#line 483 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_key_level_hint((yyvsp[-2].hint_param_table), (yyvsp[-1].hint_param_index_list), true, (yyvsp[-4].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1948 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1949 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 58:
-#line 489 "sql_hints.yy" /* yacc.c:1646  */
+#line 490 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_key_level_hint((yyvsp[-2].hint_param_table), (yyvsp[-1].hint_param_index_list), false, (yyvsp[-4].hint_type));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 1958 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1959 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 59:
-#line 498 "sql_hints.yy" /* yacc.c:1646  */
+#line 499 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= BKA_HINT_ENUM;
           }
-#line 1966 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1967 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 60:
-#line 502 "sql_hints.yy" /* yacc.c:1646  */
+#line 503 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= BNL_HINT_ENUM;
           }
-#line 1974 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1975 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 61:
-#line 506 "sql_hints.yy" /* yacc.c:1646  */
+#line 507 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= HASH_JOIN_HINT_ENUM;
           }
-#line 1982 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1983 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 62:
-#line 510 "sql_hints.yy" /* yacc.c:1646  */
+#line 511 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= DERIVED_MERGE_HINT_ENUM;
           }
-#line 1990 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1991 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 63:
-#line 514 "sql_hints.yy" /* yacc.c:1646  */
+#line 515 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= DERIVED_CONDITION_PUSHDOWN_HINT_ENUM;
           }
-#line 1998 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 1999 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 64:
-#line 521 "sql_hints.yy" /* yacc.c:1646  */
+#line 522 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= BKA_HINT_ENUM;
           }
-#line 2006 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2007 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 65:
-#line 525 "sql_hints.yy" /* yacc.c:1646  */
+#line 526 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= BNL_HINT_ENUM;
           }
-#line 2014 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2015 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 66:
-#line 529 "sql_hints.yy" /* yacc.c:1646  */
+#line 530 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= HASH_JOIN_HINT_ENUM;
           }
-#line 2022 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2023 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 67:
-#line 533 "sql_hints.yy" /* yacc.c:1646  */
+#line 534 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= DERIVED_MERGE_HINT_ENUM;
           }
-#line 2030 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2031 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 68:
-#line 537 "sql_hints.yy" /* yacc.c:1646  */
+#line 538 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= DERIVED_CONDITION_PUSHDOWN_HINT_ENUM;
           }
-#line 2038 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2039 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 69:
-#line 544 "sql_hints.yy" /* yacc.c:1646  */
+#line 545 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= MRR_HINT_ENUM;
           }
-#line 2046 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2047 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 70:
-#line 548 "sql_hints.yy" /* yacc.c:1646  */
+#line 549 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= NO_RANGE_HINT_ENUM;
           }
-#line 2054 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2055 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 71:
-#line 552 "sql_hints.yy" /* yacc.c:1646  */
+#line 553 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= INDEX_MERGE_HINT_ENUM;
           }
-#line 2062 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2063 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 72:
-#line 556 "sql_hints.yy" /* yacc.c:1646  */
+#line 557 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= SKIP_SCAN_HINT_ENUM;
           }
-#line 2070 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2071 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 73:
-#line 560 "sql_hints.yy" /* yacc.c:1646  */
+#line 561 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= INDEX_HINT_ENUM;
           }
-#line 2078 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2079 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 74:
-#line 564 "sql_hints.yy" /* yacc.c:1646  */
+#line 565 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= JOIN_INDEX_HINT_ENUM;
           }
-#line 2086 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2087 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 75:
-#line 568 "sql_hints.yy" /* yacc.c:1646  */
+#line 569 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= GROUP_INDEX_HINT_ENUM;
           }
-#line 2094 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2095 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 76:
-#line 572 "sql_hints.yy" /* yacc.c:1646  */
+#line 573 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= ORDER_INDEX_HINT_ENUM;
           }
-#line 2102 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2103 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 77:
-#line 579 "sql_hints.yy" /* yacc.c:1646  */
+#line 580 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= ICP_HINT_ENUM;
           }
-#line 2110 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2111 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 78:
-#line 583 "sql_hints.yy" /* yacc.c:1646  */
+#line 584 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= MRR_HINT_ENUM;
           }
-#line 2118 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2119 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 79:
-#line 587 "sql_hints.yy" /* yacc.c:1646  */
+#line 588 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= INDEX_MERGE_HINT_ENUM;
           }
-#line 2126 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2127 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 80:
-#line 591 "sql_hints.yy" /* yacc.c:1646  */
+#line 592 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= SKIP_SCAN_HINT_ENUM;
           }
-#line 2134 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2135 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 81:
-#line 595 "sql_hints.yy" /* yacc.c:1646  */
+#line 596 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= INDEX_HINT_ENUM;
           }
-#line 2142 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2143 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 82:
-#line 599 "sql_hints.yy" /* yacc.c:1646  */
+#line 600 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= JOIN_INDEX_HINT_ENUM;
           }
-#line 2150 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2151 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 83:
-#line 603 "sql_hints.yy" /* yacc.c:1646  */
+#line 604 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= GROUP_INDEX_HINT_ENUM;
           }
-#line 2158 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2159 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 84:
-#line 607 "sql_hints.yy" /* yacc.c:1646  */
+#line 608 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint_type)= ORDER_INDEX_HINT_ENUM;
           }
-#line 2166 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2167 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 85:
-#line 614 "sql_hints.yy" /* yacc.c:1646  */
+#line 615 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_hint_qb_name((yyvsp[-1].lexer.hint_string));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 2176 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2177 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 86:
-#line 623 "sql_hints.yy" /* yacc.c:1646  */
+#line 624 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.hint)= NEW_PTN PT_hint_sys_var((yyvsp[-3].lexer.hint_string), (yyvsp[-1].item));
             if ((yyval.hint) == NULL)
               YYABORT; // OOM
           }
-#line 2186 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2187 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 87:
-#line 632 "sql_hints.yy" /* yacc.c:1646  */
+#line 633 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
            if (check_resource_group_name_len((yyvsp[-1].lexer.hint_string), Sql_condition::SL_WARNING))
              YYERROR;
@@ -2195,11 +2196,11 @@ yyreduce:
            if ((yyval.hint) == nullptr)
               YYABORT; // OOM
          }
-#line 2199 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2200 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 90:
-#line 649 "sql_hints.yy" /* yacc.c:1646  */
+#line 650 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             longlong n;
             if (parse_int(&n, (yyvsp[0].lexer.hint_string).str, (yyvsp[0].lexer.hint_string).length))
@@ -2214,19 +2215,19 @@ yyreduce:
                 YYABORT; // OOM
             }
           }
-#line 2218 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2219 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 91:
-#line 664 "sql_hints.yy" /* yacc.c:1646  */
+#line 665 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             (yyval.item)= NEW_PTN Item_float((yyvsp[0].lexer.hint_string).str, (yyvsp[0].lexer.hint_string).length);
           }
-#line 2226 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2227 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 92:
-#line 668 "sql_hints.yy" /* yacc.c:1646  */
+#line 669 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
             longlong n;
             if (parse_int(&n, (yyvsp[0].lexer.hint_string).str, (yyvsp[0].lexer.hint_string).length - 1))
@@ -2245,7 +2246,7 @@ yyreduce:
                 assert(0); // should not happen
                 YYABORT;        // for sure
               }
-              if (1.0L * n * multiplier > LLONG_MAX)
+              if (1.0L * n * multiplier > LLONG_MAX_DOUBLE)
               {
                 scanner->syntax_warning(ER_THD(thd, ER_WRONG_SIZE_NUMBER));
                 (yyval.item)= NULL;
@@ -2258,21 +2259,21 @@ yyreduce:
               }
             }
           }
-#line 2262 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2263 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
   case 95:
-#line 708 "sql_hints.yy" /* yacc.c:1646  */
+#line 709 "/var/lib/pb2/sb_1-9698527-1671205045.47/mysql-8.0.32-release-export-2619913_gpl/sql/sql_hints.yy" /* yacc.c:1646  */
     {
           (yyval.item)= NEW_PTN Item_string((yyvsp[0].lexer.hint_string).str, (yyvsp[0].lexer.hint_string).length, thd->charset());
           if ((yyval.item) == NULL)
             YYABORT; // OOM
         }
-#line 2272 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2273 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
     break;
 
 
-#line 2276 "/var/lib/pb2/sb_1-7663233-1657143500.24/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
+#line 2277 "/var/lib/pb2/sb_1-9698527-1671205045.47/dist_GPL/sql/sql_hints.yy.cc" /* yacc.c:1646  */
       default: break;
     }
   /* User semantic actions sometimes alter yychar, and that requires
