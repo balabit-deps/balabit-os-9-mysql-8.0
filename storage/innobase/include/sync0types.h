@@ -314,6 +314,8 @@ enum latch_level_t {
 
   SYNC_DICT_OPERATION,
 
+  SYNC_AHI_ENABLED,
+
   SYNC_TRX_I_S_LAST_READ,
 
   SYNC_TRX_I_S_RWLOCK,
@@ -338,6 +340,7 @@ up its meta-data. See sync0debug.c. The order does not matter here, but
 alphabetical ordering seems useful */
 enum latch_id_t {
   LATCH_ID_NONE = 0,
+  LATCH_ID_AHI_ENABLED,
   LATCH_ID_AUTOINC,
   LATCH_ID_BUF_BLOCK_MUTEX,
   LATCH_ID_BUF_POOL_CHUNKS,
@@ -924,14 +927,9 @@ inline mysql_pfs_key_t sync_latch_get_pfs_key(latch_id_t id) {
 /** String representation of the filename and line number where the
 latch was created
 @param[in]      id              Latch ID
-@param[in]      created         Filename and line number where it was crated
+@param[in]      created         Filename and line number where it was created
 @return the string representation */
 std::string sync_mutex_to_string(latch_id_t id, const std::string &created);
-
-/** Get the latch name from a sync level
-@param[in]      level           Latch level to lookup
-@return nullptr if not found. */
-const char *sync_latch_get_name(latch_level_t level);
 
 /** Print the filename "basename"
 @return the basename */
@@ -1072,7 +1070,7 @@ struct btrsea_sync_check : public sync_check_functor_t {
     Plugin in this case is I_S which is sharing the latch vector
     of InnoDB and so there could be lock conflicts. Ideally
     the Plugin should use a difference namespace latch vector
-    as it doesn't have any depedency with SE latching protocol.
+    as it doesn't have any dependency with SE latching protocol.
 
     Added check that will allow thread to hold I_S latches */
 
@@ -1204,11 +1202,6 @@ struct sync_allowed_latches : public sync_check_functor_t {
   /** List of latch levels that are allowed to be held */
   latches_t m_latches;
 };
-
-/** Get the latch id from a latch name.
-@param[in]      name    Latch name
-@return latch id if found else LATCH_ID_NONE. */
-latch_id_t sync_latch_get_id(const char *name);
 
 typedef ulint rw_lock_flags_t;
 

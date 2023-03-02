@@ -277,7 +277,7 @@ TEST_F(ItemTest, ItemString) {
   EXPECT_EQ(MYSQL_TYPE_STRING, field_string.type());
 
   // CHAR field for testing strings with illegal values
-  Mock_field_string field_string_utf8(20, &my_charset_utf8_general_ci);
+  Mock_field_string field_string_utf8(20, &my_charset_utf8mb3_general_ci);
   EXPECT_EQ(MYSQL_TYPE_STRING, field_string_utf8.type());
 
   /*
@@ -324,7 +324,7 @@ TEST_F(ItemTest, ItemString) {
 
   // VARCHAR field for testing strings with illegal values
   Mock_field_varstring field_varstring_utf8(20, &table_share,
-                                            &my_charset_utf8_general_ci);
+                                            &my_charset_utf8mb3_general_ci);
   EXPECT_EQ(MYSQL_TYPE_VARCHAR, field_varstring_utf8.type());
 
   /*
@@ -391,7 +391,7 @@ TEST_F(ItemTest, ItemViewRef) {
 
   // Create a view reference over a constant expression from an inner
   // table of an outer join.
-  TABLE_LIST table;
+  Table_ref table;
   table.outer_join = true;
   table.set_tableno(2);
   Item_view_ref *view_ref =

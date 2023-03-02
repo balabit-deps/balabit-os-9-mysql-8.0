@@ -71,7 +71,7 @@ const char *SYSTEM_TABLE_NAME[] = {
     "SYS_FIELDS",      "SYS_FOREIGN",   "SYS_FOREIGN_COLS",
     "SYS_TABLESPACES", "SYS_DATAFILES", "SYS_VIRTUAL"};
 
-/** This variant is based on name comparision and is used because
+/** This variant is based on name comparison and is used because
 system table id array is not built yet.
 @param[in]      name    InnoDB table name
 @return true if table name is InnoDB SYSTEM table */
@@ -828,20 +828,16 @@ dict_index_t.
 @return error message
 @retval NULL on success */
 static const char *dict_load_field_low(
-    byte *index_id,          /*!< in/out: index id (8 bytes)
-                             an "in" value if index != NULL
-                             and "out" if index == NULL */
-    dict_index_t *index,     /*!< in/out: index, could be NULL
-                             if we just populate a dict_field_t
-                             struct with information from
-                             a SYS_FIELDS record */
-    dict_field_t *sys_field, /*!< out: dict_field_t to be
-                             filled */
-    ulint *pos,              /*!< out: Field position */
-    byte *last_index_id,     /*!< in: last index id */
-    mem_heap_t *heap,        /*!< in/out: memory heap
-                             for temporary storage */
-    const rec_t *rec)        /*!< in: SYS_FIELDS record */
+    byte *index_id,      /*!< in/out: index id (8 bytes)
+                         an "in" value if index != NULL
+                         and "out" if index == NULL */
+    dict_index_t *index, /*!< in/out: index, could be NULL
+                         if we just populate a dict_field_t
+                         struct with information from
+                         a SYS_FIELDS record */
+    mem_heap_t *heap,    /*!< in/out: memory heap
+                         for temporary storage */
+    const rec_t *rec)    /*!< in: SYS_FIELDS record */
 {
   const byte *field;
   ulint len;
@@ -849,10 +845,9 @@ static const char *dict_load_field_low(
   ulint prefix_len;
   bool is_ascending;
   bool first_field;
-  ulint position;
 
-  /* Either index or sys_field is supplied, not both */
-  ut_a((!index) || (!sys_field));
+  /* Index is supplied */
+  ut_a(index);
 
   if (rec_get_deleted_flag(rec, 0)) {
     return (dict_load_field_del);
@@ -869,15 +864,9 @@ static const char *dict_load_field_low(
     return ("incorrect column length in SYS_FIELDS");
   }
 
-  if (!index) {
-    ut_a(last_index_id);
-    memcpy(index_id, (const char *)field, 8);
-    first_field = memcmp(index_id, last_index_id, 8);
-  } else {
-    first_field = (index->n_def == 0);
-    if (memcmp(field, index_id, 8)) {
-      return ("SYS_FIELDS.INDEX_ID mismatch");
-    }
+  first_field = (index->n_def == 0);
+  if (memcmp(field, index_id, 8)) {
+    return ("SYS_FIELDS.INDEX_ID mismatch");
   }
 
   /* The next field stores the field position in the index and a
@@ -904,11 +893,9 @@ static const char *dict_load_field_low(
   if (first_field || pos_and_prefix_len > 0xFFFFUL) {
     prefix_len = pos_and_prefix_len & 0x7FFFUL;
     is_ascending = !(pos_and_prefix_len & 0x8000UL);
-    position = (pos_and_prefix_len & 0xFFFF0000UL) >> 16;
   } else {
     prefix_len = 0;
     is_ascending = true;
-    position = pos_and_prefix_len & 0xFFFFUL;
   }
 
   rec_get_nth_field_offs_old(nullptr, rec, DICT_FLD__SYS_FIELDS__DB_TRX_ID,
@@ -928,17 +915,8 @@ static const char *dict_load_field_low(
     goto err_len;
   }
 
-  if (index) {
-    index->add_field(mem_heap_strdupl(heap, (const char *)field, len),
-                     prefix_len, is_ascending);
-  } else {
-    ut_a(sys_field);
-    ut_a(pos);
-
-    sys_field->name = mem_heap_strdupl(heap, (const char *)field, len);
-    sys_field->prefix_len = prefix_len;
-    *pos = position;
-  }
+  index->add_field(mem_heap_strdupl(heap, (const char *)field, len), prefix_len,
+                   is_ascending);
 
   return (nullptr);
 }
@@ -1482,7 +1460,7 @@ static inline space_id_t dict_check_sys_tables(bool validate) {
     const char *tbl_name;
     std::string dict_table_name;
 
-    /* If a table record is not useable, ignore it and continue
+    /* If a table record is not usable, ignore it and continue
     on to the next record. Error messages were logged. */
     if (dict_sys_tables_rec_check(rec) != nullptr) {
       continue;
@@ -1614,7 +1592,7 @@ static inline space_id_t dict_check_sys_tables(bool validate) {
     } else {
       /* This tablespace is not found in
       SYS_TABLESPACES and we are able to
-      successfuly open it. Add it to std::set.
+      successfully open it. Add it to std::set.
       It will be later used for register tablespaces
       to mysql.tablespaces */
       if (space_name_from_dict == nullptr) {
@@ -1723,7 +1701,7 @@ static void dict_load_columns(dict_table_t *table, /*!< in/out: table */
 
       /* We do not add fts tables to optimize thread
       during upgrade because fts tables will be renamed
-      as part of upgrade. These tables wil be added
+      as part of upgrade. These tables will be added
       to fts optimize queue when they are opened. */
       if (table->fts == nullptr && !srv_is_upgrade_mode) {
         table->fts = fts_create(table);
@@ -1796,8 +1774,7 @@ static ulint dict_load_fields(
 
     ut_a(pcur.is_on_user_rec());
 
-    err_msg =
-        dict_load_field_low(buf, index, nullptr, nullptr, nullptr, heap, rec);
+    err_msg = dict_load_field_low(buf, index, heap, rec);
 
     if (err_msg == dict_load_field_del) {
       /* There could be delete marked records in
@@ -2588,7 +2565,7 @@ func_exit:
   if (table && table->fts) {
     /* We do not add fts tables to optimize thread
     during upgrade because fts tables will be renamed
-    as part of upgrade. These tables wil be added
+    as part of upgrade. These tables will be added
     to fts optimize queue when they are opened. */
 
     if (!(dict_table_has_fts_index(table) ||

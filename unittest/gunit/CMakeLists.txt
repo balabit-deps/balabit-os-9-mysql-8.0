@@ -134,7 +134,6 @@ SET(TESTS
   filesort_buffer
   filesort_compare
   filesort_mergechunk
-  float_compare
   inplace_vector
   integer_digits
   intrusive_list_iterator
@@ -203,6 +202,7 @@ ENDFOREACH()
 
 # Add tests (link them with gunit/gmock libraries and the server libraries)
 SET(SERVER_TESTS
+  bgc_ticket_manager
   character_set_deprecation
   compare_access_paths
   connect_joins
@@ -304,14 +304,8 @@ SET(SERVER_TESTS
   wild_case_compare
   ha_info_iterator
   xid_extract
+  log_event_status_size
 )
-
-DISABLE_GOOGLEMOCK_UNINITIALIZED_WARNING(
-  copy_info-t.cc
-  dd_schema-t.cc
-  opt_range-t.cc
-  regexp_engine-t.cc
-  )
 
 IF(MY_COMPILER_IS_GNU AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12)
   ADD_COMPILE_FLAGS(regexp_engine-t.cc COMPILE_FLAGS "-Wno-restrict")

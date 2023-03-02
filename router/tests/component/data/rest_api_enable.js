@@ -51,7 +51,7 @@ var group_replication_membership_online =
 
 var options = {
   cluster_type: "gr",
-  innodb_cluster_name: "my-cluster",
+  innodb_cluster_name: "mycluster",
   innodb_cluster_instances: mysqld.global.innodb_cluster_instances,
   gr_id: mysqld.global.gr_id,
   group_replication_name: mysqld.global.gr_id,
@@ -74,6 +74,7 @@ var common_responses = common_stmts.prepare_statement_responses(
       "router_start_transaction",
       "router_commit",
       "router_select_rest_accounts_credentials",
+      "router_clusterset_present",
 
       // to fail account verification in some tests this is not added on
       // purpose

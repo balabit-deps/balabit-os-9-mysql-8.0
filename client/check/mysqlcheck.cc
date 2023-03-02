@@ -178,8 +178,8 @@ static struct my_option my_long_options[] = {
      nullptr, nullptr, nullptr, GET_NO_ARG, NO_ARG, 0, 0, 0, nullptr, 0,
      nullptr},
     {"write-binlog", OPT_WRITE_BINLOG,
-     "Log ANALYZE, OPTIMIZE and REPAIR TABLE commands. Use --skip-write-binlog "
-     "when commands should not be sent to replication slaves.",
+     "Write ANALYZE, OPTIMIZE and REPAIR TABLE commands to the binary log. "
+     "Use --skip-write-binlog to omit this.",
      &opt_write_binlog, &opt_write_binlog, nullptr, GET_BOOL, NO_ARG, 1, 0, 0,
      nullptr, 0, nullptr},
     {"optimize", 'o', "Optimize table.", nullptr, nullptr, nullptr, GET_NO_ARG,
@@ -362,6 +362,9 @@ static bool get_one_option(int optid, const struct my_option *opt,
     case OPT_MYSQL_PROTOCOL:
       opt_protocol =
           find_type_or_exit(argument, &sql_protocol_typelib, opt->name);
+      break;
+    case OPT_COMPRESS:
+      CLIENT_WARN_DEPRECATED("--compress", "--compression-algorithms");
       break;
   }
 

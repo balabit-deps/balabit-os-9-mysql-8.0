@@ -202,7 +202,7 @@ static inline ulint rw_lock_get_sx_lock_count(
 
 /** Two different implementations for decrementing the lock_word of a rw_lock:
  one for systems supporting atomic operations, one for others. This does
- does not support recusive x-locks: they should be handled by the caller and
+ does not support recursive x-locks: they should be handled by the caller and
  need not be atomic since they are performed by the current lock holder.
  Returns true if the decrement was made, false if not.
  @return true if decr occurs */
@@ -465,8 +465,7 @@ static inline void rw_lock_sx_unlock_func(IF_DEBUG(ulint pass, )
 #ifdef UNIV_PFS_RWLOCK
 
 static inline void pfs_rw_lock_create_func(mysql_pfs_key_t key, rw_lock_t *lock,
-                                           IF_DEBUG(latch_level_t level,
-                                                    const char *cmutex_name, )
+                                           IF_DEBUG(latch_id_t id, )
                                                ut::Location clocation) {
   new (lock) rw_lock_t{};
 
@@ -474,7 +473,7 @@ static inline void pfs_rw_lock_create_func(mysql_pfs_key_t key, rw_lock_t *lock,
   lock->pfs_psi = PSI_RWLOCK_CALL(init_rwlock)(key.m_value, lock);
 
   /* The actual function to initialize an rwlock */
-  rw_lock_create_func(lock, IF_DEBUG(level, cmutex_name, ) clocation);
+  rw_lock_create_func(lock, IF_DEBUG(id, ) clocation);
 }
 /** Performance schema instrumented wrap function for rw_lock_x_lock_func()
  NOTE! Please use the corresponding macro rw_lock_x_lock(), not directly

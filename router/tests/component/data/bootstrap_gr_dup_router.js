@@ -6,7 +6,7 @@ if (mysqld.global.innodb_cluster_instances === undefined) {
 }
 
 if (mysqld.global.cluster_name == undefined) {
-  mysqld.global.cluster_name = "my-cluster";
+  mysqld.global.cluster_name = "mycluster";
 }
 
 var options = {
@@ -29,6 +29,7 @@ var common_responses = common_stmts.prepare_statement_responses(
       "router_select_cluster_instances_v2",
       "router_start_transaction",
       "router_commit",
+      "router_clusterset_present",
     ],
     options);
 var router_insert_into_routers =

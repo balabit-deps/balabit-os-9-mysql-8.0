@@ -73,7 +73,7 @@ IMPORTANT NOTE: Any operation that generates redo MUST check that there
 is enough space in the redo log before for that operation. This is
 done by calling log_free_check(). The reason for checking the
 availability of the redo log space before the start of the operation is
-that we MUST not hold any synchonization objects when performing the
+that we MUST not hold any synchronization objects when performing the
 check.
 If you make a change in this module make sure that no codepath is
 introduced where a call to log_free_check() is bypassed. */
@@ -149,7 +149,9 @@ introduced where a call to log_free_check() is bypassed. */
         btr_cur, offsets, offsets_heap, heap, &dummy_big_rec, node->update,
         node->cmpl_info, thr, thr_get_trx(thr)->id, node->undo_no, mtr, pcur);
 
-    ut_a(!dummy_big_rec || node->table->has_row_versions());
+    const rec_t *rec = btr_cur_get_rec(btr_cur);
+    ut_a(!dummy_big_rec || materialize_instant_default(btr_cur->index, rec));
+
     if (dummy_big_rec) {
       ut_a(err == DB_SUCCESS);
 
@@ -579,7 +581,7 @@ func_exit_no_pcur:
     dict_index_t *index, /*!< in: index */
     dtuple_t *entry,     /*!< in: index entry */
     undo_no_t undo_no)
-/*!< in: undo number upto which to rollback.*/
+/*!< in: undo number up to which to rollback.*/
 {
   btr_pcur_t pcur;
   btr_cur_t *btr_cur = pcur.get_btr_cur();

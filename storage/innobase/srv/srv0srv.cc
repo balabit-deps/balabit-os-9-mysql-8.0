@@ -630,7 +630,7 @@ FILE *srv_monitor_file;
 This mutex has a very low rank; threads reserving it should not
 acquire any further latches or sleep before releasing this one. */
 ib_mutex_t srv_misc_tmpfile_mutex;
-/** Temporary file for miscellanous diagnostic output */
+/** Temporary file for miscellaneous diagnostic output */
 FILE *srv_misc_tmpfile;
 
 #ifndef UNIV_HOTBACKUP
@@ -1442,9 +1442,10 @@ bool srv_printf_innodb_monitor(FILE *file, bool nowait, ulint *trx_start_pos,
   ibuf_print(file);
 
   for (ulint i = 0; i < btr_ahi_parts; ++i) {
-    rw_lock_s_lock(btr_search_latches[i], UT_LOCATION_HERE);
-    ha_print_info(file, btr_search_sys->hash_tables[i]);
-    rw_lock_s_unlock(btr_search_latches[i]);
+    auto &part = btr_search_sys->parts[i];
+    rw_lock_s_lock(&part.latch, UT_LOCATION_HERE);
+    ha_print_info(file, part.hash_table);
+    rw_lock_s_unlock(&part.latch);
   }
 
   fprintf(file, "%.2f hash searches/s, %.2f non-hash searches/s\n",
@@ -1468,7 +1469,7 @@ bool srv_printf_innodb_monitor(FILE *file, bool nowait, ulint *trx_start_pos,
   fprintf(file,
           "Total large memory allocated " ULINTPF
           "\n"
-          "Dictionary memory allocated " ULINTPF "\n",
+          "Dictionary memory allocated %zu\n",
           os_total_large_mem_allocated.load(), dict_sys->size);
 
   buf_print_io(file);
@@ -1621,13 +1622,16 @@ void srv_export_innodb_status(void) {
 
   export_vars.innodb_buffer_pool_pages_free = free_len;
 
-#ifdef UNIV_DEBUG
-  export_vars.innodb_buffer_pool_pages_latched = buf_get_latched_pages_number();
-#endif /* UNIV_DEBUG */
   export_vars.innodb_buffer_pool_pages_total = buf_pool_get_n_pages();
 
   export_vars.innodb_buffer_pool_pages_misc =
       buf_pool_get_n_pages() - LRU_len - free_len;
+
+  export_vars.innodb_buffer_pool_resize_status_code =
+      buf_pool_resize_status_code.load();
+
+  export_vars.innodb_buffer_pool_resize_status_progress =
+      buf_pool_resize_status_progress.load();
 
   export_vars.innodb_page_size = UNIV_PAGE_SIZE;
 

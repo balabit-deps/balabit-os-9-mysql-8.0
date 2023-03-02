@@ -30,6 +30,8 @@ Created 10/13/2010 Jimmy Yang */
 
 #include <sys/types.h>
 
+#include "univ.i"
+
 #include "ddl0ddl.h"
 #include "ddl0fts.h"
 #include "ddl0impl-builder.h"
@@ -38,6 +40,7 @@ Created 10/13/2010 Jimmy Yang */
 #include "fts0plugin.h"
 #include "lob0lob.h"
 #include "os0thread-create.h"
+#include "sql/sql_class.h"
 
 #include <current_thd.h>
 
@@ -182,6 +185,8 @@ struct FTS::Parser {
   /** Set the parent thread state.
   @param[in] state              The parent state. */
   void set_parent_state(Thread_state state) noexcept { m_parent_state = state; }
+
+  Diagnostics_area da{false};
 
  private:
   /** Tokenize incoming text data and add to the sort buffer.
@@ -850,7 +855,11 @@ void FTS::Parser::parse(Builder *builder) noexcept {
   auto clean_up = [&](dberr_t err) {
     mem_heap_free(blob_heap);
 
-    IF_ENABLED("ddl_fts_write_failure", err = DB_TEMP_FILE_WRITE_FAIL;)
+#ifdef UNIV_DEBUG
+    if (Sync_point::enabled(m_ctx.thd(), "ddl_fts_write_failure")) {
+      err = DB_TEMP_FILE_WRITE_FAIL;
+    };
+#endif
 
     if (err != DB_SUCCESS) {
       builder->set_error(err);
@@ -1086,7 +1095,7 @@ dberr_t FTS::Inserter::write_node(const Insert *ins_ctx,
   }
 
   {
-    /* The third and fourth fileds(TRX_ID, ROLL_PTR) are filled already.*/
+    /* The third and fourth fields(TRX_ID, ROLL_PTR) are filled already.*/
     /* The fifth field is last_doc_id */
     auto field = dtuple_get_nth_field(tuple, 4);
     fts_write_doc_id((byte *)&last_doc_id, node->last_doc_id);
@@ -1145,7 +1154,7 @@ void FTS::Inserter::insert_tuple(Insert *ins_ctx, fts_tokenizer_word_t *word,
                                  const dtuple_t *dtuple) noexcept {
   fts_node_t *fts_node;
 
-  /* Get fts_node for the FTS auxillary INDEX table */
+  /* Get fts_node for the FTS auxiliary INDEX table */
   if (ib_vector_size(word->nodes) > 0) {
     fts_node = static_cast<fts_node_t *>(ib_vector_last(word->nodes));
   } else {
@@ -1187,7 +1196,7 @@ void FTS::Inserter::insert_tuple(Insert *ins_ctx, fts_tokenizer_word_t *word,
   if (innobase_fts_text_cmp(ins_ctx->m_charset, &word->text, &token_word) !=
       0) {
     /* Getting a new word, flush the last position info
-    for the currnt word in fts_node */
+    for the current word in fts_node */
     if (ib_vector_size(positions) > 0) {
       fts_cache_node_add_positions(nullptr, fts_node, *in_doc_id, positions);
     }
@@ -1364,7 +1373,6 @@ dberr_t FTS::Inserter::insert(Builder *builder,
   Merge_cursor cursor(builder, nullptr, nullptr);
 
   {
-    size_t i{};
     const auto n_buffers = handler->m_files.size();
     const auto io_buffer_size = m_ctx.merge_io_buffer_size(n_buffers);
 
@@ -1376,9 +1384,6 @@ dberr_t FTS::Inserter::insert(Builder *builder,
       if (err != DB_SUCCESS) {
         return err;
       }
-
-      ++i;
-
       total_rows += file.m_n_recs;
     }
   }
@@ -1500,15 +1505,23 @@ dberr_t FTS::init(size_t n_threads) noexcept {
 dberr_t FTS::start_parse_threads(Builder *builder) noexcept {
   auto fn = [&](PSI_thread_seqnum seqnum, Parser *parser, Builder *builder) {
     ut_a(seqnum > 0);
+#ifdef UNIV_PFS_THREAD
     Runnable runnable{fts_parallel_tokenization_thread_key, seqnum};
+#else
+    Runnable runnable{PSI_NOT_INSTRUMENTED, seqnum};
+#endif /* UNIV_PFS_THREAD */
 
-    auto old_thd = current_thd;
+    my_thread_init();
 
-    current_thd = m_ctx.thd();
+    auto thd = create_internal_thd();
+    ut_ad(current_thd == thd);
 
+    thd->push_diagnostics_area(&parser->da, false);
     parser->parse(builder);
+    thd->pop_diagnostics_area();
 
-    current_thd = old_thd;
+    destroy_internal_thd(current_thd);
+    my_thread_end();
   };
 
   size_t seqnum{1};
@@ -1533,6 +1546,15 @@ dberr_t FTS::enqueue(FTS::Doc_item *doc_item) noexcept {
 
 dberr_t FTS::check_for_errors() noexcept {
   for (auto parser : m_parsers) {
+    auto da = &parser->da;
+    if (da->is_error() && !m_ctx.thd()->is_error()) {
+      m_ctx.thd()->get_stmt_da()->set_error_status(
+          da->mysql_errno(), da->message_text(), da->returned_sqlstate());
+    }
+    m_ctx.thd()->get_stmt_da()->copy_sql_conditions_from_da(m_ctx.thd(),
+                                                            &parser->da);
+  }
+  for (auto parser : m_parsers) {
     auto err = parser->get_error();
 
     if (err != DB_SUCCESS) {
@@ -1553,7 +1575,11 @@ dberr_t FTS::insert(Builder *builder) noexcept {
   auto fn = [&](PSI_thread_seqnum seqnum, FTS::Inserter::Handler *handler,
                 dberr_t &err) {
     ut_a(seqnum > 0);
+#ifdef UNIV_PFS_THREAD
     Runnable runnable{fts_parallel_merge_thread_key, seqnum};
+#else
+    Runnable runnable{PSI_NOT_INSTRUMENTED, seqnum};
+#endif /* UNIV_PFS_THREAD */
 
     if (!handler->m_files.empty()) {
       err = m_inserter->insert(builder, handler);

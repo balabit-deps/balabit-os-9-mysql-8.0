@@ -192,12 +192,6 @@ void deinit_keyring_services(SERVICE_TYPE(registry) *) { return; }
 }  // namespace encryption
 }  // namespace innobase
 
-constexpr char Encryption::KEY_MAGIC_V1[];
-constexpr char Encryption::KEY_MAGIC_V2[];
-constexpr char Encryption::KEY_MAGIC_V3[];
-constexpr char Encryption::MASTER_KEY_PREFIX[];
-constexpr char Encryption::DEFAULT_MASTER_KEY[];
-
 /** Minimum length needed for encryption */
 constexpr size_t MIN_ENCRYPTION_LEN = 2 * MY_AES_BLOCK_SIZE + FIL_PAGE_DATA;
 /** Key type */
@@ -286,7 +280,7 @@ void Encryption::get_master_key(uint32_t master_key_id, char *srv_uuid,
     snprintf(key_name, MASTER_KEY_NAME_MAX_LEN, "%s-%s-" UINT32PF,
              MASTER_KEY_PREFIX, srv_uuid, master_key_id);
   } else {
-    /* For compitable with 5.7.11, we need to get master key with
+    /* For compatibility with 5.7.11, we need to get master key with
     server id. */
 
     snprintf(key_name, MASTER_KEY_NAME_MAX_LEN, "%s-%lu-" UINT32PF,
@@ -825,7 +819,7 @@ bool Encryption::encrypt_log_block(const IORequest &, byte *src_ptr,
       /* Encrypt the remain bytes. Since my_aes_encrypt
       request the content which need to encrypt is
       multiple of MY_AES_BLOCK_SIZE, but the block
-      content is possiblly not, so, we need to handle
+      content is possibly not, so, we need to handle
       the tail bytes first. */
       if (remain_len != 0) {
         remain_len = MY_AES_BLOCK_SIZE * 2;

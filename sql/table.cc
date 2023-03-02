@@ -159,7 +159,7 @@ LEX_CSTRING PARSE_GCOL_KEYWORD = {STRING_WITH_LEN("parse_gcol_expr")};
 
 /* Functions defined in this file */
 
-static Item *create_view_field(THD *thd, TABLE_LIST *view, Item **field_ref,
+static Item *create_view_field(THD *thd, Table_ref *view, Item **field_ref,
                                const char *name,
                                Name_resolution_context *context);
 static void open_table_error(THD *thd, TABLE_SHARE *share, int error,
@@ -227,7 +227,7 @@ View_creation_ctx *View_creation_ctx::create(THD *thd) {
 
 /*************************************************************************/
 
-View_creation_ctx *View_creation_ctx::create(THD *thd, TABLE_LIST *view) {
+View_creation_ctx *View_creation_ctx::create(THD *thd, Table_ref *view) {
   View_creation_ctx *ctx = new (thd->mem_root) View_creation_ctx(thd);
 
   /* Throw a warning if there is NULL cs name. */
@@ -978,6 +978,19 @@ static int read_string(File file, uchar **to, size_t length) {
   return 0;
 } /* read_string */
 
+namespace {
+
+/**
+  convert a hex digit into number.
+*/
+
+inline int hexchar_to_int(char c) {
+  if (c <= '9' && c >= '0') return c - '0';
+  c |= 32;
+  if (c <= 'f' && c >= 'a') return c - 'a' + 10;
+  return -1;
+}
+
 /**
   Un-hex all elements in a typelib.
 
@@ -987,7 +1000,7 @@ static int read_string(File file, uchar **to, size_t length) {
   not be used any where else in the code. This function will be removed later.
 */
 
-static void unhex_type2(TYPELIB *interval) {
+void unhex_type2(TYPELIB *interval) {
   for (uint pos = 0; pos < interval->count; pos++) {
     char *from, *to;
     for (from = to = const_cast<char *>(interval->type_names[pos]); *from;) {
@@ -1005,6 +1018,8 @@ static void unhex_type2(TYPELIB *interval) {
     interval->type_lengths[pos] /= 2;
   }
 }
+
+}  // namespace
 
 /**
  Search after a field with given start & length
@@ -1688,6 +1703,21 @@ static int open_binary_frm(THD *thd, TABLE_SHARE *share,
         error = 1;
         my_error(ER_NO_SUCH_TABLE, MYF(0), share->db.str,
                  share->table_name.str);
+        goto err;
+      } else if (!tmp_plugin && name.length == 7 &&
+                 !strncmp(name.str, "ndbinfo", name.length)) {
+        /*
+          When upgrading from MySQL Cluster 7.5 or 7.6, both MySQL 5.7 based,
+          there may be FRM files for ndbinfo tables. If server is not compiled
+          with ndbinfo storage engine or it is not enabled the table can not be
+          created.  This is not a critical failure since ndbinfo tables are
+          read only tables returning rows on demand about the current state of
+          Ndb cluster and not row data is kept on file.  If ndbinfo engine
+          later is enabled it will create its tables again.
+        */
+        DBUG_PRINT("info", ("ignoring ndbinfo table '%s.%s'", share->db.str,
+                            share->table_name.str));
+        error = 9;
         goto err;
       } else if (!tmp_plugin) {
         /* purecov: begin inspected */
@@ -2378,8 +2408,8 @@ static bool fix_value_generator_fields(THD *thd, TABLE *table,
         std::unique_ptr<Functional_index_error_handler>(
             new Functional_index_error_handler(field, thd));
 
-  // Set up a TABLE_LIST object for the table.
-  TABLE_LIST tables;
+  // Set up a Table_ref object for the table.
+  Table_ref tables;
   // Set alias and real name to table name
   tables.alias = table->s->table_name.str;
   tables.table_name = table->s->table_name.str;
@@ -2394,9 +2424,9 @@ static bool fix_value_generator_fields(THD *thd, TABLE *table,
 
   // Save the name resolution context and use_only_table_context
   Name_resolution_context *context = thd->lex->current_context();
-  TABLE_LIST *save_table_list = context->table_list;
-  TABLE_LIST *save_first_table = context->first_name_resolution_table;
-  TABLE_LIST *save_last_table = context->last_name_resolution_table;
+  Table_ref *save_table_list = context->table_list;
+  Table_ref *save_first_table = context->first_name_resolution_table;
+  Table_ref *save_last_table = context->last_name_resolution_table;
   context->table_list = &tables;
   context->first_name_resolution_table = &tables;
   context->last_name_resolution_table = nullptr;
@@ -3396,6 +3426,14 @@ static void open_table_error(THD *thd, TABLE_SHARE *share, int error,
       my_error(ER_NOT_FORM_FILE, MYF(0), buff);
       LogErr(ERROR_LEVEL, ER_SERVER_NOT_FORM_FILE, buff);
       break;
+    case 9:
+      /*
+        Report no error. No harm not creating the table. Used when ndbinfo
+        plugin is not available when migrating FRM files from 5.7. These
+        tables are unusable without plugin, and will be recreated without loss
+        if plugin is later enabled.
+      */
+      break;
   }
 } /* open_table_error */
 
@@ -4026,14 +4064,14 @@ Blob_mem_storage::~Blob_mem_storage() { storage.Clear(); }
   Initialize TABLE instance (newly created, or coming either from table
   cache or THD::temporary_tables list) and prepare it for further use
   during statement execution. Set the 'alias' attribute from the specified
-  TABLE_LIST element. Remember the TABLE_LIST element in the
+  Table_ref element. Remember the Table_ref element in the
   TABLE::pos_in_table_list member.
 
   @param thd  Thread context.
-  @param tl   TABLE_LIST element.
+  @param tl   Table_ref element.
 */
 
-void TABLE::init(THD *thd, TABLE_LIST *tl) {
+void TABLE::init(THD *thd, Table_ref *tl) {
 #ifndef NDEBUG
   if (s->tmp_table == NO_TMP_TABLE) {
     mysql_mutex_lock(&LOCK_open);
@@ -4269,29 +4307,7 @@ bool TABLE::fill_item_list(mem_root_deque<Item *> *item_list) const {
 }
 
 /**
-  Reset an existing list of Item_field items to point to the
-  Fields of this table.
-
-  SYNPOSIS
-    TABLE::reset_item_list()
-      item_list          a non-empty list with Item_fields
-
-    This is a counterpart of fill_item_list used to redirect
-    Item_fields to the fields of a newly created table.
-*/
-
-void TABLE::reset_item_list(const mem_root_deque<Item *> &item_list) const {
-  auto it = item_list.begin();
-  uint i = 0;
-  for (Field **ptr = visible_field_ptr(); *ptr; ptr++, i++) {
-    Item_field *item_field = down_cast<Item_field *>(*it++);
-    assert(item_field != nullptr);
-    item_field->reset_field(*ptr);
-  }
-}
-
-/**
-  Create a TABLE_LIST object representing a nested join
+  Create a Table_ref object representing a nested join
 
   @param allocator  Mem root allocator that object is created from.
   @param alias      Name of nested join object
@@ -4302,12 +4318,13 @@ void TABLE::reset_item_list(const mem_root_deque<Item *> &item_list) const {
   @returns Pointer to created join nest object, or NULL if error.
 */
 
-TABLE_LIST *TABLE_LIST::new_nested_join(
-    MEM_ROOT *allocator, const char *alias, TABLE_LIST *embedding,
-    mem_root_deque<TABLE_LIST *> *belongs_to, Query_block *select) {
+Table_ref *Table_ref::new_nested_join(MEM_ROOT *allocator, const char *alias,
+                                      Table_ref *embedding,
+                                      mem_root_deque<Table_ref *> *belongs_to,
+                                      Query_block *select) {
   assert(belongs_to && select);
 
-  TABLE_LIST *const join_nest = new (allocator) TABLE_LIST;
+  Table_ref *const join_nest = new (allocator) Table_ref;
   if (join_nest == nullptr) return nullptr;
 
   join_nest->nested_join = new (allocator) NESTED_JOIN;
@@ -4324,7 +4341,7 @@ TABLE_LIST *TABLE_LIST::new_nested_join(
   join_nest->query_block = select;
   join_nest->nested_join->first_nested = NO_PLAN_IDX;
 
-  join_nest->nested_join->join_list.clear();
+  join_nest->nested_join->m_tables.clear();
 
   return join_nest;
 }
@@ -4337,13 +4354,13 @@ TABLE_LIST *TABLE_LIST::new_nested_join(
   @return false if success, true if error
 */
 
-bool TABLE_LIST::merge_underlying_tables(Query_block *select) {
-  assert(nested_join->join_list.empty());
+bool Table_ref::merge_underlying_tables(Query_block *select) {
+  assert(nested_join->m_tables.empty());
 
-  for (TABLE_LIST *tl : select->top_join_list) {
+  for (Table_ref *tl : select->m_table_nest) {
     tl->embedding = this;
-    tl->join_list = &nested_join->join_list;
-    nested_join->join_list.push_back(tl);
+    tl->join_list = &nested_join->m_tables;
+    nested_join->m_tables.push_back(tl);
   }
 
   return false;
@@ -4352,7 +4369,7 @@ bool TABLE_LIST::merge_underlying_tables(Query_block *select) {
 /**
    Reset a table reference after preparation or execution, before (re-)execution
 */
-void TABLE_LIST::reset() {
+void Table_ref::reset() {
   // Reset connection to TABLE
   if (is_base_table()) table = nullptr;
 
@@ -4378,16 +4395,16 @@ void TABLE_LIST::reset() {
 }
 
 /**
-  Save persistent properties from TABLE into TABLE_LIST.
+  Save persistent properties from TABLE into Table_ref.
   Required because some properties about a table are calculated inside TABLE
   but should last for the duration of the statement. Since the TABLEs are
   released after execution of a statement and rebound at start of next
-  execution, those properties must be saved in TABLE_LIST after a statement is
-  prepared.
+  execution, those properties must be saved in Table_ref after a statement
+  is prepared.
 
   @returns false if success, true if error
 */
-bool TABLE_LIST::save_properties() {
+bool Table_ref::save_properties() {
   size_t size = bitmap_buffer_size(table->s->fields);
   my_bitmap_map *read_map, *write_map;
   if (table->s->fields <= 64) {
@@ -4427,11 +4444,11 @@ bool TABLE_LIST::save_properties() {
 }
 
 /**
-  Restore persistent properties into TABLE from TABLE_LIST.
+  Restore persistent properties into TABLE from Table_ref.
   Required after a TABLE object has been rebound to a statement at start
   of execution of a prepared statement.
 */
-void TABLE_LIST::restore_properties() {
+void Table_ref::restore_properties() {
   assert(is_base_table());
   // CREATE VIEW will not have bitmap filled in
   if (read_set_saved.bitmap == nullptr) return;
@@ -4466,7 +4483,7 @@ void TABLE_LIST::restore_properties() {
   @return false if success, true if error
 */
 
-bool TABLE_LIST::merge_where(THD *thd) {
+bool Table_ref::merge_where(THD *thd) {
   DBUG_TRACE;
 
   assert(is_merged());
@@ -4503,7 +4520,7 @@ bool TABLE_LIST::merge_where(THD *thd) {
   @return false if success, true if error.
 */
 
-bool TABLE_LIST::create_field_translation(THD *thd) {
+bool Table_ref::create_field_translation(THD *thd) {
   Query_block *select = derived->first_query_block();
   uint field_count = 0;
 
@@ -4552,7 +4569,7 @@ bool TABLE_LIST::create_field_translation(THD *thd) {
   @returns  false for success, true for error
 */
 
-static bool merge_join_conditions(THD *thd, TABLE_LIST *table, Item **pcond) {
+static bool merge_join_conditions(THD *thd, Table_ref *table, Item **pcond) {
   DBUG_TRACE;
 
   *pcond = nullptr;
@@ -4562,7 +4579,7 @@ static bool merge_join_conditions(THD *thd, TABLE_LIST *table, Item **pcond) {
       return true; /* purecov: inspected */
   }
   if (!table->nested_join) return false;
-  for (TABLE_LIST *tbl : table->nested_join->join_list) {
+  for (Table_ref *tbl : table->nested_join->m_tables) {
     if (tbl->is_view()) continue;
     Item *cond;
     if (merge_join_conditions(thd, tbl, &cond))
@@ -4600,7 +4617,7 @@ static bool merge_join_conditions(THD *thd, TABLE_LIST *table, Item **pcond) {
   @returns false if success, true if error
 */
 
-bool TABLE_LIST::prepare_check_option(THD *thd, bool is_cascaded) {
+bool Table_ref::prepare_check_option(THD *thd, bool is_cascaded) {
   DBUG_TRACE;
   assert(is_view());
 
@@ -4610,7 +4627,7 @@ bool TABLE_LIST::prepare_check_option(THD *thd, bool is_cascaded) {
   */
   is_cascaded |= (with_check == VIEW_CHECK_CASCADED);
 
-  for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
+  for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
     if (tbl->is_view() && tbl->prepare_check_option(thd, is_cascaded))
       return true; /* purecov: inspected */
   }
@@ -4621,7 +4638,7 @@ bool TABLE_LIST::prepare_check_option(THD *thd, bool is_cascaded) {
         merge_join_conditions(thd, this, &check_option))
       return true; /* purecov: inspected */
 
-    for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
+    for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
       if (tbl->check_option &&
           !(check_option = and_conds(check_option, tbl->check_option)))
         return true; /* purecov: inspected */
@@ -4659,10 +4676,10 @@ bool TABLE_LIST::prepare_check_option(THD *thd, bool is_cascaded) {
   @returns false if success, true if error
 */
 
-bool TABLE_LIST::prepare_replace_filter(THD *thd) {
+bool Table_ref::prepare_replace_filter(THD *thd) {
   DBUG_TRACE;
 
-  for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
+  for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
     if (tbl->is_view() && tbl->prepare_replace_filter(thd)) return true;
   }
 
@@ -4671,7 +4688,7 @@ bool TABLE_LIST::prepare_replace_filter(THD *thd) {
 
     if (merge_join_conditions(thd, this, &replace_filter))
       return true; /* purecov: inspected */
-    for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
+    for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
       if (tbl->replace_filter) {
         if (!(replace_filter = and_conds(replace_filter, tbl->replace_filter)))
           return true;
@@ -4696,7 +4713,7 @@ bool TABLE_LIST::prepare_replace_filter(THD *thd) {
   Cleanup items belonged to view fields translation table
 */
 
-void TABLE_LIST::cleanup_items() {
+void Table_ref::cleanup_items() {
   if (!field_translation) return;
 
   for (Field_translator *transl = field_translation;
@@ -4714,9 +4731,9 @@ void TABLE_LIST::cleanup_items() {
   @retval VIEW_CHECK_SKIP   FAILED, but continue
 */
 
-int TABLE_LIST::view_check_option(THD *thd) const {
+int Table_ref::view_check_option(THD *thd) const {
   if (check_option && check_option->val_int() == 0) {
-    const TABLE_LIST *main_view = top_table();
+    const Table_ref *main_view = top_table();
     my_error(ER_VIEW_CHECK_FAILED, MYF(0), main_view->db,
              main_view->table_name);
     if (thd->lex->is_ignore()) return (VIEW_CHECK_SKIP);
@@ -4737,8 +4754,8 @@ int TABLE_LIST::view_check_option(THD *thd) const {
   @retval true  found several tables
 */
 
-bool TABLE_LIST::check_single_table(TABLE_LIST **table_ref, table_map map) {
-  for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
+bool Table_ref::check_single_table(Table_ref **table_ref, table_map map) {
+  for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local) {
     if (tbl->is_view_or_derived() && tbl->is_merged()) {
       if (tbl->check_single_table(table_ref, map)) return true;
     } else if (tbl->map() & map) {
@@ -4758,7 +4775,7 @@ bool TABLE_LIST::check_single_table(TABLE_LIST **table_ref, table_map map) {
   @returns false if success, true if error (out of memory)
 */
 
-bool TABLE_LIST::set_insert_values(MEM_ROOT *mem_root) {
+bool Table_ref::set_insert_values(MEM_ROOT *mem_root) {
   if (table) {
     assert(table->insert_values == nullptr);
     if (!table->insert_values &&
@@ -4767,7 +4784,7 @@ bool TABLE_LIST::set_insert_values(MEM_ROOT *mem_root) {
       return true; /* purecov: inspected */
   } else {
     assert(view && merge_underlying_list);
-    for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local)
+    for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local)
       if (tbl->set_insert_values(mem_root))
         return true; /* purecov: inspected */
   }
@@ -4786,7 +4803,7 @@ bool TABLE_LIST::set_insert_values(MEM_ROOT *mem_root) {
 
   @retval true if a leaf, false otherwise.
 */
-bool TABLE_LIST::is_leaf_for_name_resolution() const {
+bool Table_ref::is_leaf_for_name_resolution() const {
   return (is_view_or_derived() || is_natural_join || is_join_columns_complete ||
           !nested_join);
 }
@@ -4809,8 +4826,8 @@ bool TABLE_LIST::is_leaf_for_name_resolution() const {
     else return 'this'
 */
 
-TABLE_LIST *TABLE_LIST::first_leaf_for_name_resolution() {
-  TABLE_LIST *cur_table_ref = nullptr;
+Table_ref *Table_ref::first_leaf_for_name_resolution() {
+  Table_ref *cur_table_ref = nullptr;
   NESTED_JOIN *cur_nested_join;
 
   if (is_leaf_for_name_resolution()) return this;
@@ -4819,14 +4836,14 @@ TABLE_LIST *TABLE_LIST::first_leaf_for_name_resolution() {
   for (cur_nested_join = nested_join; cur_nested_join;
        cur_nested_join = cur_table_ref->nested_join) {
     // The first operand is in the end of the list of join operands
-    cur_table_ref = cur_nested_join->join_list.back();
+    cur_table_ref = cur_nested_join->m_tables.back();
     if (cur_table_ref->is_leaf_for_name_resolution()) break;
   }
   return cur_table_ref;
 }
 
-TABLE_LIST *TABLE_LIST::last_leaf_for_name_resolution() {
-  TABLE_LIST *cur_table_ref = this;
+Table_ref *Table_ref::last_leaf_for_name_resolution() {
+  Table_ref *cur_table_ref = this;
   NESTED_JOIN *cur_nested_join;
 
   if (is_leaf_for_name_resolution()) return this;
@@ -4834,7 +4851,7 @@ TABLE_LIST *TABLE_LIST::last_leaf_for_name_resolution() {
 
   for (cur_nested_join = nested_join; cur_nested_join;
        cur_nested_join = cur_table_ref->nested_join) {
-    cur_table_ref = cur_nested_join->join_list.front();
+    cur_table_ref = cur_nested_join->m_tables.front();
     if (cur_table_ref->is_leaf_for_name_resolution()) break;
   }
   return cur_table_ref;
@@ -4849,7 +4866,7 @@ TABLE_LIST *TABLE_LIST::last_leaf_for_name_resolution() {
   @retval true Error
 */
 
-bool TABLE_LIST::prepare_view_security_context(THD *thd) {
+bool Table_ref::prepare_view_security_context(THD *thd) {
   DBUG_TRACE;
   DBUG_PRINT("enter", ("table: %s", alias));
 
@@ -4894,9 +4911,9 @@ bool TABLE_LIST::prepare_view_security_context(THD *thd) {
 
 */
 
-Security_context *TABLE_LIST::find_view_security_context(THD *thd) {
+Security_context *Table_ref::find_view_security_context(THD *thd) {
   Security_context *sctx;
-  TABLE_LIST *upper_view = this;
+  Table_ref *upper_view = this;
   DBUG_TRACE;
 
   assert(view);
@@ -4925,7 +4942,7 @@ Security_context *TABLE_LIST::find_view_security_context(THD *thd) {
   @retval true Error
 */
 
-bool TABLE_LIST::prepare_security(THD *thd) {
+bool Table_ref::prepare_security(THD *thd) {
   DBUG_TRACE;
   Security_context *save_security_ctx = thd->security_context();
 
@@ -4934,7 +4951,7 @@ bool TABLE_LIST::prepare_security(THD *thd) {
   /* Acl_map was previously checked out by get_aclroot */
   thd->set_security_context(find_view_security_context(thd));
   opt_trace_disable_if_no_security_context_access(thd);
-  for (TABLE_LIST *tbl : *view_tables) {
+  for (Table_ref *tbl : *view_tables) {
     assert(tbl->referencing_view);
     if (tbl->is_derived()) {
       /* Initialize privileges for derived tables */
@@ -4949,7 +4966,7 @@ bool TABLE_LIST::prepare_security(THD *thd) {
 }
 
 Natural_join_column::Natural_join_column(Field_translator *field_param,
-                                         TABLE_LIST *tab) {
+                                         Table_ref *tab) {
   assert(tab->field_translation);
   view_field = field_param;
   table_field = nullptr;
@@ -4958,7 +4975,7 @@ Natural_join_column::Natural_join_column(Field_translator *field_param,
 }
 
 Natural_join_column::Natural_join_column(Item_field *field_param,
-                                         TABLE_LIST *tab) {
+                                         Table_ref *tab) {
   assert(tab->table == field_param->field->table);
   table_field = field_param;
   /*
@@ -5005,7 +5022,7 @@ const char *Natural_join_column::table_name() {
 
 const char *Natural_join_column::db_name() {
   /*
-    Test that TABLE_LIST::db is the same as TABLE_SHARE::db to
+    Test that Table_ref::db is the same as TABLE_SHARE::db to
     ensure consistency. An exception are I_S schema tables, which
     are inconsistent in this respect.
   */
@@ -5019,7 +5036,7 @@ const char *Natural_join_column::db_name() {
 
 GRANT_INFO *Natural_join_column::grant() { return &table_ref->grant; }
 
-void Field_iterator_view::set(TABLE_LIST *table) {
+void Field_iterator_view::set(Table_ref *table) {
   assert(table->field_translation);
   view = table;
   ptr = table->field_translation;
@@ -5029,7 +5046,7 @@ void Field_iterator_view::set(TABLE_LIST *table) {
 const char *Field_iterator_table::name() { return (*ptr)->field_name; }
 
 Item *Field_iterator_table::create_item(THD *thd) {
-  TABLE_LIST *tr = (*ptr)->table->pos_in_table_list;
+  Table_ref *tr = (*ptr)->table->pos_in_table_list;
   Item_field *item = new Item_field(thd, &tr->query_block->context, tr, *ptr);
   if (item == nullptr) return nullptr;
   /*
@@ -5051,7 +5068,7 @@ Item *Field_iterator_view::create_item(THD *thd) {
   return create_view_field(thd, view, &ptr->item, ptr->name, &select->context);
 }
 
-static Item *create_view_field(THD *, TABLE_LIST *view, Item **field_ref,
+static Item *create_view_field(THD *, Table_ref *view, Item **field_ref,
                                const char *name,
                                Name_resolution_context *context) {
   DBUG_TRACE;
@@ -5103,7 +5120,7 @@ static Item *create_view_field(THD *, TABLE_LIST *view, Item **field_ref,
   return item;
 }
 
-void Field_iterator_natural_join::set(TABLE_LIST *table_ref) {
+void Field_iterator_natural_join::set(Table_ref *table_ref) {
   assert(table_ref->join_columns);
   column_ref_it.init(*(table_ref->join_columns));
   cur_column_ref = column_ref_it++;
@@ -5120,9 +5137,9 @@ void Field_iterator_table_ref::set_field_iterator() {
   DBUG_TRACE;
   /*
     If the table reference we are iterating over is a natural join, or it is
-    an operand of a natural join, and TABLE_LIST::join_columns contains all
+    an operand of a natural join, and Table_ref::join_columns contains all
     the columns of the join operand, then we pick the columns from
-    TABLE_LIST::join_columns, instead of the original container of the
+    Table_ref::join_columns, instead of the original container of the
     columns of the join operator.
   */
   if (table_ref->is_join_columns_complete) {
@@ -5159,7 +5176,7 @@ void Field_iterator_table_ref::set_field_iterator() {
   field_it->set(table_ref);
 }
 
-void Field_iterator_table_ref::set(TABLE_LIST *table) {
+void Field_iterator_table_ref::set(Table_ref *table) {
   assert(table);
   first_leaf = table->first_leaf_for_name_resolution();
   last_leaf = table->last_leaf_for_name_resolution();
@@ -5194,7 +5211,7 @@ const char *Field_iterator_table_ref::get_db_name() {
     return natural_join_it.column_ref()->db_name();
 
   /*
-    Test that TABLE_LIST::db is the same as TABLE_SHARE::db to
+    Test that Table_ref::db is the same as TABLE_SHARE::db to
     ensure consistency. An exception are I_S schema tables, which
     are inconsistent in this respect and any_db (used in the handler
     interface to manage aliases).
@@ -5251,11 +5268,11 @@ GRANT_INFO *Field_iterator_table_ref::grant() {
 */
 
 Natural_join_column *Field_iterator_table_ref::get_or_create_column_ref(
-    THD *thd, TABLE_LIST *parent_table_ref) {
+    THD *thd, Table_ref *parent_table_ref) {
   Natural_join_column *nj_col;
   bool is_created = true;
   uint field_count = 0;
-  TABLE_LIST *add_table_ref = parent_table_ref ? parent_table_ref : table_ref;
+  Table_ref *add_table_ref = parent_table_ref ? parent_table_ref : table_ref;
 
   if (field_it == &table_field_it) {
     /* The field belongs to a stored table. */
@@ -6272,12 +6289,12 @@ void TABLE::mark_check_constraint_columns(bool is_update) {
   if (bitmap_updated) file->column_bitmaps_signal();
 }
 
-uint TABLE_LIST::query_block_id() const {
+uint Table_ref::query_block_id() const {
   if (!derived) return 0;
   return derived->first_query_block()->select_number;
 }
 
-uint TABLE_LIST::query_block_id_for_explain() const {
+uint Table_ref::query_block_id_for_explain() const {
   if (!derived) return 0;
   if (!m_common_table_expr || !m_common_table_expr->tmp_tables.size())
     return derived->first_query_block()->select_number;
@@ -6294,7 +6311,7 @@ uint TABLE_LIST::query_block_id_for_explain() const {
   @param tbl the TABLE to operate on.
 
     The parser collects the index hints for each table in a "tagged list"
-    (TABLE_LIST::index_hints). Using the information in this tagged list
+    (Table_ref::index_hints). Using the information in this tagged list
     this function sets the members st_table::keys_in_use_for_query,
     st_table::keys_in_use_for_group_by, st_table::keys_in_use_for_order_by,
     st_table::force_index, st_table::force_index_order,
@@ -6332,7 +6349,7 @@ uint TABLE_LIST::query_block_id_for_explain() const {
   @retval false No errors found.
   @retval true Found and reported an error.
 */
-bool TABLE_LIST::process_index_hints(const THD *thd, TABLE *tbl) {
+bool Table_ref::process_index_hints(const THD *thd, TABLE *tbl) {
   /* initialize the result variables */
   tbl->keys_in_use_for_query = tbl->keys_in_use_for_group_by =
       tbl->keys_in_use_for_order_by = tbl->s->usable_indexes(thd);
@@ -6452,7 +6469,7 @@ bool TABLE_LIST::process_index_hints(const THD *thd, TABLE *tbl) {
    objects for all elements of table list.
 */
 
-void init_mdl_requests(TABLE_LIST *table_list) {
+void init_mdl_requests(Table_ref *table_list) {
   for (; table_list; table_list = table_list->next_global)
     MDL_REQUEST_INIT(&table_list->mdl_request, MDL_key::TABLE, table_list->db,
                      table_list->table_name,
@@ -6464,7 +6481,7 @@ void init_mdl_requests(TABLE_LIST *table_list) {
   @returns true if view or derived table is mergeable, based on
   technical constraints.
 */
-bool TABLE_LIST::is_mergeable() const {
+bool Table_ref::is_mergeable() const {
   if (!is_view_or_derived() || algorithm == VIEW_ALGORITHM_TEMPTABLE)
     return false;
   /*
@@ -6478,7 +6495,7 @@ bool TABLE_LIST::is_mergeable() const {
   return derived->is_mergeable();
 }
 
-bool TABLE_LIST::materializable_is_const() const {
+bool Table_ref::materializable_is_const() const {
   assert(uses_materialization());
   const Query_expression *unit = derived_query_expression();
   return unit->query_result()->estimated_rowcount <= 1 &&
@@ -6490,14 +6507,14 @@ bool TABLE_LIST::materializable_is_const() const {
   Return the number of leaf tables for a merged view.
 */
 
-uint TABLE_LIST::leaf_tables_count() const {
+uint Table_ref::leaf_tables_count() const {
   // Join nests are not permissible, except as merged views
   assert(nested_join == nullptr || is_merged());
   if (!is_merged())  // Base table or materialized view
     return 1;
 
   uint count = 0;
-  for (TABLE_LIST *tbl = merge_underlying_list; tbl; tbl = tbl->next_local)
+  for (Table_ref *tbl = merge_underlying_list; tbl; tbl = tbl->next_local)
     count += tbl->leaf_tables_count();
 
   return count;
@@ -6508,8 +6525,8 @@ uint TABLE_LIST::leaf_tables_count() const {
   Retrieve number of rows in the table
 
   @details
-  Retrieve number of rows in the table referred by this TABLE_LIST and
-  store it in the table's stats.records variable. If this TABLE_LIST refers
+  Retrieve number of rows in the table referred by this Table_ref and
+  store it in the table's stats.records variable. If this Table_ref refers
   to a materialized derived table/view, then the estimated number of rows of
   the derived table/view is used instead.
 
@@ -6517,7 +6534,7 @@ uint TABLE_LIST::leaf_tables_count() const {
   @return non zero   error
 */
 
-int TABLE_LIST::fetch_number_of_rows() {
+int Table_ref::fetch_number_of_rows() {
   int error = 0;
   if (is_table_function()) {
     // FIXME: open question - there's no estimate for table function.
@@ -6612,7 +6629,7 @@ int TABLE_LIST::fetch_number_of_rows() {
   3. drop unused keys from the table.
 
   The above procedure is implemented in 4 functions:
-  1. TABLE_LIST::update_derived_keys()
+  1. Table_ref::update_derived_keys()
                           Create/extend list of possible keys for one derived
                           table/view based on given field/used tables info.
                           (Step one)
@@ -6621,9 +6638,9 @@ int TABLE_LIST::fetch_number_of_rows() {
                           when all possible info on keys is gathered and it's
                           safe to add keys - no keys or key parts would be
                           missed.  Walk over list of derived tables/views and
-                          call to TABLE_LIST::generate_keys to actually
+                          call to Table_ref::generate_keys to actually
                           generate keys. (Step two)
-  3. TABLE_LIST::generate_keys()
+  3. Table_ref::generate_keys()
                           Walks over list of possible keys for this derived
                           table/view to add keys to the result table.
                           Calls to TABLE::add_tmp_key() to actually add
@@ -6826,8 +6843,8 @@ static bool add_derived_key(THD *thd, List<Derived_key> &derived_key_list,
   @returns false if success, true if error
 */
 
-bool TABLE_LIST::update_derived_keys(THD *thd, Field *field, Item **values,
-                                     uint num_values, bool *allocated) {
+bool Table_ref::update_derived_keys(THD *thd, Field *field, Item **values,
+                                    uint num_values, bool *allocated) {
   *allocated = false;
   /*
     Don't bother with keys for CREATE VIEW, BLOB fields and fields with
@@ -6862,7 +6879,7 @@ bool TABLE_LIST::update_derived_keys(THD *thd, Field *field, Item **values,
 
 /*
   Comparison function for Derived_key entries.
-  See TABLE_LIST::generate_keys.
+  See Table_ref::generate_keys.
 */
 
 static int Derived_key_comp(Derived_key *e1, Derived_key *e2) {
@@ -6886,7 +6903,7 @@ static int Derived_key_comp(Derived_key *e1, Derived_key *e2) {
   @return false all keys were successfully added.
 */
 
-bool TABLE_LIST::generate_keys() {
+bool Table_ref::generate_keys() {
   assert(uses_materialization());
 
   if (!derived_key_list.elements) return false;
@@ -7240,19 +7257,19 @@ void TABLE::column_bitmaps_set(MY_BITMAP *read_set_arg,
   if (file && created) file->column_bitmaps_signal();
 }
 
-bool TABLE_LIST::set_recursive_reference() {
+bool Table_ref::set_recursive_reference() {
   if (query_block->recursive_reference != nullptr) return true;
   query_block->recursive_reference = this;
   m_is_recursive_reference = true;
   return false;
 }
 
-bool TABLE_LIST::is_derived_unfinished_materialization() const {
+bool Table_ref::is_derived_unfinished_materialization() const {
   return (is_view_or_derived() &&
           derived_query_expression()->unfinished_materialization());
 }
 
-uint TABLE_LIST::get_hidden_field_count_for_derived() const {
+uint Table_ref::get_hidden_field_count_for_derived() const {
   assert(is_view_or_derived());
   return derived_result->get_hidden_field_count();
 }
@@ -7745,10 +7762,15 @@ void TABLE::disable_logical_diffs_for_current_row(const Field *field) const {
 
   @retval  true   Error
   @retval  false  Success
+
+  @retval  0      Sucess
+  @retval  -1     Error
+  @retval  -2     Less severe error, file can safely be ignored (used for
+                  ndbinfo tables when ndbinfo storage engine is not enabled)
 */
-static bool read_frm_file(THD *thd, TABLE_SHARE *share,
-                          FRM_context *frm_context, const std::string &table,
-                          bool is_fix_view_cols_and_deps) {
+static int read_frm_file(THD *thd, TABLE_SHARE *share, FRM_context *frm_context,
+                         const std::string &table,
+                         bool is_fix_view_cols_and_deps) {
   File file;
   uchar head[64];
   char path[FN_REFLEN + 1];
@@ -7759,7 +7781,7 @@ static bool read_frm_file(THD *thd, TABLE_SHARE *share,
 
   if ((file = mysql_file_open(key_file_frm, path, O_RDONLY, MYF(0))) < 0) {
     LogErr(ERROR_LEVEL, ER_CANT_OPEN_FRM_FILE, path);
-    return true;
+    return -1;
   }
 
   if (mysql_file_read(file, head, 64, MYF(MY_NABP))) {
@@ -7781,7 +7803,7 @@ static bool read_frm_file(THD *thd, TABLE_SHARE *share,
       */
       if (is_fix_view_cols_and_deps) {
         mysql_file_close(file, MYF(MY_WME));
-        return false;
+        return 0;
       }
       int error;
       root_ptr = THR_MALLOC;
@@ -7791,6 +7813,9 @@ static bool read_frm_file(THD *thd, TABLE_SHARE *share,
       error = open_binary_frm(thd, share, frm_context, head, file);
 
       *root_ptr = old_root;
+      if (error == 9) {
+        goto ignore_file;
+      }
       if (error) {
         LogErr(ERROR_LEVEL, ER_CANT_READ_FRM_FILE, path);
         goto err;
@@ -7826,18 +7851,21 @@ static bool read_frm_file(THD *thd, TABLE_SHARE *share,
 
   // Close file and return
   mysql_file_close(file, MYF(MY_WME));
-  return false;
+  return 0;
 
 err:
   mysql_file_close(file, MYF(MY_WME));
-  return true;
+  return -1;
+
+ignore_file:
+  mysql_file_close(file, MYF(MY_WME));
+  return -2;
 }
 
-bool create_table_share_for_upgrade(THD *thd, const char *path,
-                                    TABLE_SHARE *share,
-                                    FRM_context *frm_context,
-                                    const char *db_name, const char *table_name,
-                                    bool is_fix_view_cols_and_deps) {
+int create_table_share_for_upgrade(THD *thd, const char *path,
+                                   TABLE_SHARE *share, FRM_context *frm_context,
+                                   const char *db_name, const char *table_name,
+                                   bool is_fix_view_cols_and_deps) {
   DBUG_TRACE;
 
   init_tmp_table_share(thd, share, db_name, 0, table_name, path, nullptr);
@@ -7848,12 +7876,13 @@ bool create_table_share_for_upgrade(THD *thd, const char *path,
   mysql_mutex_init(key_TABLE_SHARE_LOCK_ha_data, &share->LOCK_ha_data,
                    MY_MUTEX_INIT_FAST);
 
-  if (read_frm_file(thd, share, frm_context, table_name,
-                    is_fix_view_cols_and_deps)) {
+  int r = read_frm_file(thd, share, frm_context, table_name,
+                        is_fix_view_cols_and_deps);
+  if (r != 0) {
     free_table_share(share);
-    return true;
+    return r;
   }
-  return false;
+  return 0;
 }
 
 void TABLE::blobs_need_not_keep_old_value() {

@@ -64,6 +64,7 @@
 #include "sql/auth/i_sha2_password_common.h"
 #include "sql/auth/sql_auth_cache.h" /* ACL_USER                    */
 #include "sql/auth/sql_authentication.h"
+#include "sql/debug_sync.h"       // DEBUG_SYNC
 #include "sql/protocol_classic.h" /* Protocol_classic            */
 #include "sql/sql_class.h"
 #include "sql/sql_const.h" /* MAX_FIELD_WIDTH             */

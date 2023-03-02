@@ -542,11 +542,10 @@ class basic_named_pipe_acceptor : public basic_named_pipe_impl<Protocol> {
     if (native_non_blocking_ == 1) flags |= PIPE_NOWAIT;
 
     if (!is_open()) {
-      const DWORD fl = protocol.type() | protocol.protocol() | flags |
-                       PIPE_REJECT_REMOTE_CLIENTS;
       auto handle = CreateNamedPipe(
           TEXT(ep_.path().c_str()), PIPE_ACCESS_DUPLEX,
-          protocol.type() | protocol.protocol() | PIPE_REJECT_REMOTE_CLIENTS,
+          protocol.type() | protocol.protocol() | PIPE_REJECT_REMOTE_CLIENTS |
+              flags,
           back_log_, 1024 * 16, 1024 * 16, NMPWAIT_USE_DEFAULT_WAIT, NULL);
 
       if (handle == impl::named_pipe::kInvalidHandle) {

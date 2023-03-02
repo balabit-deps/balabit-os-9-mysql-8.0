@@ -328,8 +328,17 @@ class ROUTER_LIB_EXPORT MySQLSession {
   };
 
   struct ROUTER_LIB_EXPORT LoggingStrategy {
-    virtual void log(const std::string &msg) = 0;
+    LoggingStrategy() = default;
+
+    LoggingStrategy(const LoggingStrategy &) = default;
+    LoggingStrategy(LoggingStrategy &&) = default;
+
+    LoggingStrategy &operator=(const LoggingStrategy &) = default;
+    LoggingStrategy &operator=(LoggingStrategy &&) = default;
+
     virtual ~LoggingStrategy() = default;
+
+    virtual void log(const std::string &msg) = 0;
   };
 
   struct ROUTER_LIB_EXPORT LoggingStrategyNone : public LoggingStrategy {
@@ -500,7 +509,7 @@ class ROUTER_LIB_EXPORT MySQLSession {
    *
    * @param q stmt to execute
    *
-   * @returns resultset on sucess, MysqlError on error
+   * @returns resultset on success, MysqlError on error
    */
   stdx::expected<mysql_result_type, MysqlError> real_query(
       const std::string &q);

@@ -98,7 +98,7 @@ struct LEX;
 struct MY_BITMAP;
 struct SAVEPOINT;
 struct TABLE;
-struct TABLE_LIST;
+class Table_ref;
 struct TABLE_SHARE;
 struct Tablespace_options;
 struct handlerton;
@@ -929,6 +929,12 @@ enum enum_schema_tables : int {
 
 enum ha_stat_type { HA_ENGINE_STATUS, HA_ENGINE_LOGS, HA_ENGINE_MUTEX };
 enum ha_notification_type : int { HA_NOTIFY_PRE_EVENT, HA_NOTIFY_POST_EVENT };
+enum ha_ddl_type : int {
+  HA_INVALID_DDL,
+  HA_ALTER_DDL,
+  HA_TRUNCATE_DDL,
+  HA_RENAME_DDL
+};
 
 /** Clone start operation mode */
 enum Ha_clone_mode {
@@ -1636,7 +1642,7 @@ typedef bool (*get_tablespace_type_t)(const dd::Tablespace &space,
 typedef bool (*get_tablespace_type_by_name_t)(const char *tablespace_name,
                                               Tablespace_type *space_type);
 
-typedef int (*fill_is_table_t)(handlerton *hton, THD *thd, TABLE_LIST *tables,
+typedef int (*fill_is_table_t)(handlerton *hton, THD *thd, Table_ref *tables,
                                class Item *cond, enum enum_schema_tables);
 
 typedef int (*binlog_func_t)(handlerton *hton, THD *thd, enum_binlog_func fn,
@@ -2029,6 +2035,40 @@ typedef bool (*notify_alter_table_t)(THD *thd, const MDL_key *mdl_key,
                                      ha_notification_type notification_type);
 
 /**
+  Notify/get permission from storage engine before or after execution of
+  RENAME TABLE operation on the table identified by the MDL key.
+
+  @param thd                Thread context.
+  @param mdl_key            MDL key identifying table which is going to be
+                            or was RENAMEd.
+  @param notification_type  Indicates whether this is pre-RENAME TABLE or
+                            post-RENAME TABLE notification.
+  @param old_db_name
+  @param old_table_name
+  @param new_db_name
+  @param new_table_name
+*/
+typedef bool (*notify_rename_table_t)(THD *thd, const MDL_key *mdl_key,
+                                      ha_notification_type notification_type,
+                                      const char *old_db_name,
+                                      const char *old_table_name,
+                                      const char *new_db_name,
+                                      const char *new_table_name);
+
+/**
+  Notify/get permission from storage engine before or after execution of
+  TRUNCATE TABLE operation on the table identified by the MDL key.
+
+  @param thd                Thread context.
+  @param mdl_key            MDL key identifying table which is going to be
+                            or was TRUNCATEd.
+  @param notification_type  Indicates whether this is pre-TRUNCATE TABLE or
+                            post-TRUNCATE TABLE notification.
+*/
+typedef bool (*notify_truncate_table_t)(THD *thd, const MDL_key *mdl_key,
+                                        ha_notification_type notification_type);
+
+/**
   @brief
   Initiate master key rotation
 
@@ -2396,7 +2436,15 @@ enum class SecondaryEngineFlag : SecondaryEngineFlags {
   // If this flag is set, aggregation (GROUP BY and DISTINCT) do not require
   // ordered inputs and create unordered outputs. This is typically the case
   // if they are implemented using hash-based techniques.
-  AGGREGATION_IS_UNORDERED = 2
+  AGGREGATION_IS_UNORDERED = 2,
+
+  /// This flag can be set to signal that a secondary storage engine will not
+  /// use MySQL's executor (see JOIN::override_executor_func). In this case, it
+  /// doesn't need MySQL's execution data structures, like internal temporary
+  /// tables, filesort objects or iterators. If the flag is set,
+  /// FinalizePlanForQueryBlock() will not make any changes to the plan, and
+  /// CreateIteratorFromAccessPath() will not be called.
+  USE_EXTERNAL_EXECUTOR = 3,
 };
 
 /// Creates an empty bitmap of access path types. This is the base
@@ -2410,6 +2458,10 @@ constexpr SecondaryEngineFlags MakeSecondaryEngineFlags(
   return (uint64_t{1} << static_cast<int>(flag1)) |
          MakeSecondaryEngineFlags(rest...);
 }
+
+/// Returns the handlerton of the secondary engine that is used in the session,
+/// or nullptr if a secondary engine is not used.
+const handlerton *SecondaryEngineHandlerton(const THD *thd);
 
 // FIXME: Temporary workaround to enable storage engine plugins to use the
 // before_commit hook. Remove after WL#11320 has been completed.
@@ -2673,6 +2725,8 @@ struct handlerton {
   replace_native_transaction_in_thd_t replace_native_transaction_in_thd;
   notify_exclusive_mdl_t notify_exclusive_mdl;
   notify_alter_table_t notify_alter_table;
+  notify_rename_table_t notify_rename_table;
+  notify_truncate_table_t notify_truncate_table;
   rotate_encryption_master_key_t rotate_encryption_master_key;
   redo_log_set_state_t redo_log_set_state;
 
@@ -2832,6 +2886,16 @@ constexpr const decltype(handlerton::flags) HTON_SUPPORTS_ENGINE_ATTRIBUTE{
 constexpr const decltype(
     handlerton::flags) HTON_SUPPORTS_GENERATED_INVISIBLE_PK{1 << 18};
 
+/** Whether the secondary engine supports DDLs. No meaning if the engine is not
+ * secondary. */
+#define HTON_SECONDARY_ENGINE_SUPPORTS_DDL (1 << 19)
+
+inline bool secondary_engine_supports_ddl(const handlerton *hton) {
+  assert(hton->flags & HTON_IS_SECONDARY_ENGINE);
+
+  return (hton->flags & HTON_SECONDARY_ENGINE_SUPPORTS_DDL) != 0;
+}
+
 inline bool ddl_is_atomic(const handlerton *hton) {
   return (hton->flags & HTON_SUPPORTS_ATOMIC_DDL) != 0;
 }
@@ -2967,7 +3031,7 @@ struct HA_CREATE_INFO {
   uint stats_sample_pages{0}; /* number of pages to sample during
                            stats estimation, if used, otherwise 0. */
   enum_stats_auto_recalc stats_auto_recalc{HA_STATS_AUTO_RECALC_DEFAULT};
-  SQL_I_List<TABLE_LIST> merge_list;
+  SQL_I_List<Table_ref> merge_list;
   handlerton *db_type{nullptr};
   /**
     Row type of the table definition.
@@ -7017,6 +7081,9 @@ handler *get_new_handler(TABLE_SHARE *share, bool partitioned, MEM_ROOT *alloc,
 handlerton *ha_checktype(THD *thd, enum legacy_db_type database_type,
                          bool no_substitute, bool report_error);
 
+bool ha_secondary_engine_supports_ddl(
+    THD *thd, const LEX_CSTRING &secondary_engine) noexcept;
+
 /**
   Get default handlerton, if handler supplied is null.
 
@@ -7168,7 +7235,7 @@ int ha_rollback_trans(THD *thd, bool all);
                        coordinated transactions as found in the internal
                        transaction coordinator state.
 
-  @return 0 if recovery was successfull, non-zero otherwise.
+  @return 0 if recovery was successful, non-zero otherwise.
 */
 int ha_recover(Xid_commit_list *commit_list = nullptr,
                Xa_state_list *xa_state_list = nullptr);
@@ -7256,8 +7323,11 @@ bool ha_is_storage_engine_disabled(handlerton *se_engine);
 bool ha_notify_exclusive_mdl(THD *thd, const MDL_key *mdl_key,
                              ha_notification_type notification_type,
                              bool *victimized);
-bool ha_notify_alter_table(THD *thd, const MDL_key *mdl_key,
-                           ha_notification_type notification_type);
+bool ha_notify_table_ddl(THD *thd, const MDL_key *mdl_key,
+                         ha_notification_type notification_type,
+                         ha_ddl_type ddl_type, const char *old_db_name,
+                         const char *old_table_name, const char *new_db_name,
+                         const char *new_table_name);
 
 std::pair<int, bool> commit_owned_gtids(THD *thd, bool all);
 bool set_tx_isolation(THD *thd, enum_tx_isolation tx_isolation, bool one_shot);

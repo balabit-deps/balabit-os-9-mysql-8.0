@@ -24,8 +24,6 @@
 
 #include "mysqlrouter/connection_pool.h"
 
-#include <iostream>
-
 #include "mysql/harness/net_ts/buffer.h"
 #include "mysql/harness/net_ts/socket.h"
 
@@ -37,7 +35,7 @@ void PooledConnection::async_recv_message() {
 
   conn_->async_recv(recv_buf_, [this](std::error_code ec, size_t /* recved */) {
     if (ec) {
-      if (ec == net::stream_errc::eof) {
+      if (ec == make_error_condition(net::stream_errc::eof)) {
         // cancel the timer and let that close the connection.
         idle_timer_.cancel();
 
@@ -100,6 +98,22 @@ void ConnectionPool::add(ConnectionPool::connection_type conn) {
     last.remover([this, it = std::prev(pool.end())]() { erase(it); });
     last.async_idle(idle_timeout_);
   });
+}
+
+std::optional<ConnectionPool::connection_type> ConnectionPool::add_if_not_full(
+    ConnectionPool::connection_type conn) {
+  return pool_(
+      [&](auto &pool) -> std::optional<ConnectionPool::connection_type> {
+        if (pool.size() >= max_pooled_connections_) return std::move(conn);
+
+        pool.push_back(std::move(conn));
+
+        auto &last = pool.back();
+        last.remover([this, it = std::prev(pool.end())]() { erase(it); });
+        last.async_idle(idle_timeout_);
+
+        return std::nullopt;
+      });
 }
 
 uint32_t ConnectionPool::current_pooled_connections() const {

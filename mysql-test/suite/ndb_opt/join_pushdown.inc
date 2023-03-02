@@ -5763,6 +5763,102 @@ eval $query;
 
 drop table t;
 
+
+--echo ##################
+--echo #
+--echo # Bug#34482783 NDB: mysqld crash in ::is_pushable_within_nest()
+--echo #
+--echo ##################
+
+create table t (
+  pk int primary key,
+  col_int_key int not null,
+  col_int int not null,
+  key(col_int_key)
+) engine = ndbcluster;
+
+# No rows needed in table to provoke bug
+
+let $query=
+SELECT *
+FROM t AS table1
+  LEFT JOIN t AS table2
+    JOIN t AS table3 ON table2.col_int IS NULL  # <- 'zero rows'
+  ON table1.col_int = table2.col_int AND
+     table1.col_int_key = table2.col_int_key AND
+     table1.pk = table3.pk;
+
+--replace_regex /  \(cost=.*//
+eval explain format=tree $query;
+--sorted_result
+eval $query;
+
+drop table t;
+
+
+--echo ##################
+--echo #
+--echo # Bug#34723413 A 'pushed join' should not start with a scan-table
+--echo #              returning very few rows .
+--echo #
+--echo ##################
+
+create table t10 (
+  k int not null auto_increment,
+  i int,
+  primary key(k),
+  key(i)
+) engine = ndbcluster;
+
+insert into t10(i) values (1),(2),(3),(4),(5),(6),(7),(8),(9),(0);
+
+create table t100 like t10;
+insert into t100(i)
+ select x.i from t10 as x, t10 as y;
+
+create table t1000 like t10;
+insert into t1000(i)
+ select x.i from t10 as x, t10 as y, t10 as z;
+
+# Make t10 even smaller, increase join-fanout on 'i' for t100 and t1000
+delete from t10 where i > 2;
+update t100 set i = i/3;
+update t1000 set i = i/3;
+
+analyze table t10,t100,t1000;
+
+############################
+# We could have pushed 't10 join t1000 join t100'
+# However the small table t10 might not deliver rows to all SPJ workers,
+# leaving some of them idle. Thus it will usually be better to :
+# - Fetch t10 rows
+# - For every t10 row: Push 't1000 join t100'
+#
+# Expect the explain-warning:
+#
+# Didn't push table 't10' as root, too few rows to enable full parallelism
+#
+--replace_regex /  \(cost=.*//
+explain format=tree
+select *
+from t10
+  straight_join t1000 on t1000.i = t10.i
+  straight_join t100 on t100.k = t1000.k;
+
+############################
+# However:
+# Table 't100' is an ancestor of t10, and can't be made
+# and t1000 ancestor. Not pushing t10 will yield t1000 and t100
+# unpushed as well -> Push all 3 tables as first planned.
+#
+--replace_regex /  \(cost=.*//
+explain format=tree select *
+from t10
+  straight_join t1000 on t1000.i = t10.i
+  straight_join t100 on t100.k = t10.k;
+
+drop table t10,t100,t1000;
+
 ########################################
 # Verify counters for entire test:
 # Note: These tables are 'temporary' withing 'connection spj'

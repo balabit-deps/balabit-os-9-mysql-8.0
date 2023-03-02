@@ -385,7 +385,7 @@ class Codec<message::server::Ok>
    * @param buffers input buffser sequence
    * @param caps protocol capabilities
    *
-   * @retval std::pair<size_t, message::server::Ok> on sucess, with bytes
+   * @retval std::pair<size_t, message::server::Ok> on success, with bytes
    * processed
    * @retval codec_errc::invalid_input if preconditions aren't met
    * @retval codec_errc::not_enough_input not enough data to parse the whole
@@ -455,7 +455,7 @@ class Codec<message::server::Ok>
  *
  * - 0xef
  *
- * If capabilties has text_result_with_session_tracking, it is followed by
+ * If capabilities has text_result_with_session_tracking, it is followed by
  * - [rest of Ok packet]
  *
  * otherwise, if capabilities has protocol_41
@@ -529,7 +529,7 @@ class Codec<message::server::Eof>
    * @param buffers input buffser sequence
    * @param caps protocol capabilities
    *
-   * @retval std::pair<size_t, message::server::Eof> on sucess, with bytes
+   * @retval std::pair<size_t, message::server::Eof> on success, with bytes
    * processed
    * @retval codec_errc::invalid_input if preconditions aren't met
    * @retval codec_errc::not_enough_input not enough data to parse the whole
@@ -1211,7 +1211,7 @@ class Codec<message::server::StmtRow>
         accu.template step<wire::String>(bytes_per_bits(types.size()));
     if (!accu.result()) return stdx::make_unexpected(accu.result().error());
 
-    const auto nullbits = std::move(nullbits_res->value());
+    const auto nullbits = nullbits_res->value();
 
     std::vector<value_type::value_type> values;
 
@@ -2012,7 +2012,7 @@ class Codec<message::client::StmtExecute>
     std::vector<std::optional<std::string>> values;
 
     if (new_params_bound_res->value()) {
-      const auto nullbits = std::move(nullbits_res->value());
+      const auto nullbits = nullbits_res->value();
 
       types.reserve(param_count);
       values.reserve(param_count);
@@ -2260,11 +2260,11 @@ class Codec<message::client::StmtReset>
 };
 
 /**
- * codec for client's SetOption Cursor command.
+ * codec for client's SetOption command.
  */
 template <>
-class Codec<message::client::StmtSetOption>
-    : public impl::EncodeBase<Codec<message::client::StmtSetOption>> {
+class Codec<message::client::SetOption>
+    : public impl::EncodeBase<Codec<message::client::SetOption>> {
   template <class Accumulator>
   constexpr auto accumulate_fields(Accumulator &&accu) const {
     return accu.step(wire::FixedInt<1>(cmd_byte()))
@@ -2273,7 +2273,7 @@ class Codec<message::client::StmtSetOption>
   }
 
  public:
-  using value_type = message::client::StmtSetOption;
+  using value_type = message::client::SetOption;
   using __base = impl::EncodeBase<Codec<value_type>>;
 
   friend __base;
@@ -2435,7 +2435,7 @@ class Codec<message::client::Greeting>
 
         if (!shared_caps
                 [classic_protocol::capabilities::pos::connect_attributes]) {
-          // special handling for off-spec client/server implimentations.
+          // special handling for off-spec client/server implementations.
           //
           // 1. older clients may set ::plugin_auth, but
           //    ::connection_attributes which means nothing follows the

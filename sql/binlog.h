@@ -167,6 +167,8 @@ class MYSQL_BIN_LOG : public TC_LOG {
   PSI_mutex_key m_key_LOCK_flush_queue;
   /** The PFS instrumentation key for @ LOCK_sync_queue. */
   PSI_mutex_key m_key_LOCK_sync_queue;
+  /** The PFS instrumentation key for @ LOCK_wait_for_group_turn. */
+  PSI_mutex_key m_key_LOCK_wait_for_group_turn;
   /** The PFS instrumentation key for @ COND_done. */
   PSI_mutex_key m_key_COND_done;
   /** The PFS instrumentation key for @ COND_flush_queue. */
@@ -181,6 +183,8 @@ class MYSQL_BIN_LOG : public TC_LOG {
   PSI_cond_key m_key_update_cond;
   /** The instrumentation key to use for @ prep_xids_cond. */
   PSI_cond_key m_key_prep_xids_cond;
+  /** The PFS instrumentation key for @ COND_wait_for_group_turn. */
+  PSI_cond_key m_key_COND_wait_for_group_turn;
   /** The instrumentation key to use for opening the log file. */
   PSI_file_key m_key_file_log;
   /** The instrumentation key to use for opening the log index file. */
@@ -266,6 +270,17 @@ class MYSQL_BIN_LOG : public TC_LOG {
   int new_file_without_locking(
       Format_description_log_event *extra_description_event);
 
+  /**
+    Checks whether binlog caches are disabled (binlog does not cache data) or
+    empty in case binloggging is enabled in the current call to this function.
+    This function may be safely called in case binlogging is disabled.
+    @retval true binlog local caches are empty or disabled and binlogging is
+    enabled
+    @retval false binlog local caches are enabled and contain data or binlogging
+    is disabled
+  */
+  bool is_current_stmt_binlog_enabled_and_caches_empty(const THD *thd) const;
+
  private:
   int new_file_impl(bool need_lock,
                     Format_description_log_event *extra_description_event);
@@ -276,6 +291,12 @@ class MYSQL_BIN_LOG : public TC_LOG {
                                   uint32 new_index_number);
   int generate_new_name(char *new_name, const char *log_name,
                         uint32 new_index_number = 0);
+
+ protected:
+  /**
+  @brief Notifies waiting threads that binary log has been updated
+  */
+  void signal_update();
 
  public:
   const char *generate_name(const char *log_name, const char *suffix,
@@ -330,10 +351,12 @@ class MYSQL_BIN_LOG : public TC_LOG {
       PSI_mutex_key key_LOCK_flush_queue, PSI_mutex_key key_LOCK_log,
       PSI_mutex_key key_LOCK_binlog_end_pos, PSI_mutex_key key_LOCK_sync,
       PSI_mutex_key key_LOCK_sync_queue, PSI_mutex_key key_LOCK_xids,
-      PSI_cond_key key_COND_done, PSI_cond_key key_COND_flush_queue,
-      PSI_cond_key key_update_cond, PSI_cond_key key_prep_xids_cond,
-      PSI_file_key key_file_log, PSI_file_key key_file_log_index,
-      PSI_file_key key_file_log_cache, PSI_file_key key_file_log_index_cache) {
+      PSI_mutex_key key_LOCK_wait_for_group_turn, PSI_cond_key key_COND_done,
+      PSI_cond_key key_COND_flush_queue, PSI_cond_key key_update_cond,
+      PSI_cond_key key_prep_xids_cond,
+      PSI_cond_key key_COND_wait_for_group_turn, PSI_file_key key_file_log,
+      PSI_file_key key_file_log_index, PSI_file_key key_file_log_cache,
+      PSI_file_key key_file_log_index_cache) {
     m_key_COND_done = key_COND_done;
     m_key_COND_flush_queue = key_COND_flush_queue;
 
@@ -354,6 +377,9 @@ class MYSQL_BIN_LOG : public TC_LOG {
     m_key_file_log_index = key_file_log_index;
     m_key_file_log_cache = key_file_log_cache;
     m_key_file_log_index_cache = key_file_log_index_cache;
+
+    m_key_LOCK_wait_for_group_turn = key_LOCK_wait_for_group_turn;
+    m_key_COND_wait_for_group_turn = key_COND_wait_for_group_turn;
   }
 
  public:
@@ -664,16 +690,34 @@ class MYSQL_BIN_LOG : public TC_LOG {
   void reset_bytes_written() { bytes_written = 0; }
   void harvest_bytes_written(Relay_log_info *rli, bool need_log_space_lock);
   void set_max_size(ulong max_size_arg);
-  void signal_update() {
-    DBUG_TRACE;
-    mysql_cond_broadcast(&update_cond);
-    return;
-  }
 
   void update_binlog_end_pos(bool need_lock = true);
   void update_binlog_end_pos(const char *file, my_off_t pos);
 
-  int wait_for_update(const struct timespec *timeout);
+  /**
+    Wait until we get a signal that the binary log has been updated.
+
+    NOTES
+    @param[in] timeout    a pointer to a timespec;
+                          NULL means to wait w/o timeout.
+    @retval    0          if got signalled on update
+    @retval    non-0      if wait timeout elapsed
+    @note
+      LOCK_binlog_end_pos must be owned before calling this function, may be
+      temporarily released while the thread is waiting and is reacquired before
+      returning from the function
+  */
+  int wait_for_update(const std::chrono::nanoseconds &timeout);
+
+  /**
+    Wait until we get a signal that the binary log has been updated.
+    @retval    0          success
+    @note
+      LOCK_binlog_end_pos must be owned before calling this function, may be
+      temporarily released while the thread is waiting and is reacquired before
+      returning from the function
+  */
+  int wait_for_update();
 
  public:
   void init_pthread_objects();
@@ -779,7 +823,7 @@ class MYSQL_BIN_LOG : public TC_LOG {
 
  public:
   void make_log_name(char *buf, const char *log_ident);
-  bool is_active(const char *log_file_name);
+  bool is_active(const char *log_file_name) const;
   int remove_logs_from_index(LOG_INFO *linfo, bool need_update_threads);
   int rotate(bool force_rotate, bool *check_purge);
 

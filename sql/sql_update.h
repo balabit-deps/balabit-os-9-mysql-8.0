@@ -45,19 +45,19 @@ class Select_lex_visitor;
 class THD;
 class Temp_table_param;
 struct TABLE;
-struct TABLE_LIST;
+class Table_ref;
 
 bool records_are_comparable(const TABLE *table);
 bool compare_records(const TABLE *table);
 bool should_switch_to_multi_table_if_subqueries(const THD *thd,
                                                 const Query_block *select,
-                                                const TABLE_LIST *table_list);
+                                                const Table_ref *table_list);
 
 class Query_result_update final : public Query_result_interceptor {
   /// Number of tables being updated
   uint update_table_count{0};
   /// Pointer to list of updated tables, linked via 'next_local'
-  TABLE_LIST *update_tables{nullptr};
+  Table_ref *update_tables{nullptr};
   /// Array of references to temporary tables used to store cached updates
   TABLE **tmp_tables{nullptr};
   /// Array of parameter structs for creation of temporary tables
@@ -116,7 +116,7 @@ class Query_result_update final : public Query_result_interceptor {
   bool send_data(THD *thd, const mem_root_deque<Item *> &items) override;
   bool do_updates(THD *thd);
   bool send_eof(THD *thd) override;
-  void cleanup(THD *thd) override;
+  void cleanup() override;
   unique_ptr_destroy_only<RowIterator> create_iterator(
       THD *thd, MEM_ROOT *mem_root,
       unique_ptr_destroy_only<RowIterator> source);

@@ -480,6 +480,8 @@ void Clone_persist_gtid::flush_gtids(THD *thd) {
   Sid_map sid_map(nullptr);
   Gtid_set table_gtid_set(&sid_map, nullptr);
 
+  DBUG_EXECUTE_IF("gtid_persist_flush_disable", return;);
+
   /* During recovery, fetch existing GTIDs from gtid_executed table. */
   bool is_recovery = !m_thread_active.load();
   if (is_recovery && !opt_initialize) {
@@ -526,7 +528,7 @@ void Clone_persist_gtid::flush_gtids(THD *thd) {
     my_free(gtid_buffer);
   }
 
-  /* Update trx number upto which GTID is written to table. */
+  /* Update trx number up to which GTID is written to table. */
   update_gtid_trx_no(oldest_trx_no);
 
   /* Request Compression once the counter reaches threshold. */
@@ -635,7 +637,7 @@ bool Clone_persist_gtid::wait_thread(bool start, bool wait_flush,
         result = false;
         return (0);
       }
-      /* If it is flushed upto the point requested. */
+      /* If it is flushed up to the point requested. */
       if (check_flushed(flush_number)) {
         /* Check if compression is done if requested. */
         if (!compress || !m_explicit_request.load()) {

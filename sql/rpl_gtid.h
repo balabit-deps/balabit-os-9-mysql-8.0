@@ -40,7 +40,7 @@
 #include "sql/rpl_reporting.h"       // MAX_SLAVE_ERRMSG
 #include "template_utils.h"
 
-struct TABLE_LIST;
+class Table_ref;
 class THD;
 
 /**
@@ -73,7 +73,7 @@ extern PSI_memory_key key_memory_Gtid_state_group_commit_sidno;
   character pointer, is a space or not.
 */
 #define SKIP_WHITESPACE() \
-  while (my_isspace(&my_charset_utf8_general_ci, *s)) s++
+  while (my_isspace(&my_charset_utf8mb3_general_ci, *s)) s++
 /*
   This macro must be used to filter out parts of the code that
   is not used now but may be useful in future. In other words,
@@ -3338,7 +3338,7 @@ class Gtid_state {
     @retval 1 Push a warning to client.
     @retval 2 Push an error to client.
   */
-  int warn_or_err_on_modify_gtid_table(THD *thd, TABLE_LIST *table);
+  int warn_or_err_on_modify_gtid_table(THD *thd, Table_ref *table);
 #endif
 
  private:

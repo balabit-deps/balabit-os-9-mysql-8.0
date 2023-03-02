@@ -61,6 +61,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "trx0undo.h"
 #include "usr0sess.h"
 
+#include <debug_sync.h>
 #include "my_dbug.h"
 
 /*************************************************************************
@@ -68,7 +69,7 @@ IMPORTANT NOTE: Any operation that generates redo MUST check that there
 is enough space in the redo log before for that operation. This is
 done by calling log_free_check(). The reason for checking the
 availability of the redo log space before the start of the operation is
-that we MUST not hold any synchonization objects when performing the
+that we MUST not hold any synchronization objects when performing the
 check.
 If you make a change in this module make sure that no codepath is
 introduced where a call to log_free_check() is bypassed. */
@@ -1770,8 +1771,7 @@ exit_func:
   if (trx->check_foreigns == false) {
     return (DB_SUCCESS);
   }
-  DEBUG_SYNC_C_IF_THD(thr_get_trx(thr)->mysql_thd,
-                      "foreign_constraint_check_for_ins");
+  DEBUG_SYNC(thr_get_trx(thr)->mysql_thd, "foreign_constraint_check_for_ins");
 
   for (dict_foreign_set::iterator it = table->foreign_set.begin();
        it != table->foreign_set.end(); ++it) {
@@ -1946,7 +1946,7 @@ static bool row_allow_duplicates(que_thr_t *thr) {
 #if 0  // TODO: Enable this assert after WL#9509. REPLACE will not be allowed on
        // DD tables
                         /* This assert means DD tables should not use REPLACE
-                        or INSERT INTO table.. ON DUPLCIATE KEY */
+                        or INSERT INTO table.. ON DUPLICATE KEY */
                         ut_ad(!index->table->is_dd_table);
 #endif
 
@@ -2149,7 +2149,7 @@ a newer version of entry (the entry should not be inserted)
   /* NOTE: For unique non-clustered indexes there may be any number
   of delete marked records with the same value for the non-clustered
   index key (remember multiversioning), and which differ only in
-  the row refererence part of the index record, containing the
+  the row reference part of the index record, containing the
   clustered index key fields. For such a secondary index record,
   to avoid race condition, we must FIRST do the insertion and after
   that check that the uniqueness condition is not breached! */
@@ -2832,7 +2832,7 @@ dberr_t row_ins_sec_index_entry_low(uint32_t flags, ulint mode,
   });
 
   if (check) {
-    DEBUG_SYNC_C("row_ins_sec_index_enter");
+    DEBUG_SYNC(thr_get_trx(thr)->mysql_thd, "row_ins_sec_index_enter");
     if (mode == BTR_MODIFY_LEAF) {
       search_mode |= BTR_ALREADY_S_LATCHED;
       mtr_s_lock(dict_index_get_lock(index), &mtr, UT_LOCATION_HERE);
@@ -3107,8 +3107,8 @@ and return. don't execute actual insert. */
                                         entry, thr, dup_chk_only);
   }
 
-  DEBUG_SYNC_C_IF_THD(thr_get_trx(thr)->mysql_thd,
-                      "after_row_ins_clust_index_entry_leaf");
+  DEBUG_SYNC(thr_get_trx(thr)->mysql_thd,
+             "after_row_ins_clust_index_entry_leaf");
 
   if (err != DB_FAIL) {
     DEBUG_SYNC_C("row_ins_clust_index_entry_leaf_after");
@@ -3435,8 +3435,7 @@ dberr_t row_ins_index_entry_set_vals(const dict_index_t *index, dtuple_t *entry,
   err = row_ins_index_entry(node->index, node->entry, node->ins_multi_val_pos,
                             thr);
 
-  DEBUG_SYNC_C_IF_THD(thr_get_trx(thr)->mysql_thd,
-                      "after_row_ins_index_entry_step");
+  DEBUG_SYNC(thr_get_trx(thr)->mysql_thd, "after_row_ins_index_entry_step");
 
   return err;
 }

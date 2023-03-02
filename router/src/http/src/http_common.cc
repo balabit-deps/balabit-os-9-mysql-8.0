@@ -322,7 +322,7 @@ HttpUri::operator bool() const { return pImpl_->uri.operator bool(); }
 
 std::string HttpUri::decode(const std::string &uri_str,
                             const bool decode_plus) {
-  size_t out_size;
+  size_t out_size = 0;
   std::unique_ptr<char, decltype(&free)> decoded{
       evhttp_uridecode(uri_str.c_str(), decode_plus ? 1 : 0, &out_size), &free};
   return std::string(decoded.get(), out_size);
@@ -731,7 +731,8 @@ std::string HttpRequest::get_response_code_line() const {
   }
 
 #if LIBEVENT_VERSION_NUMBER >= 0x02010000
-  return evhttp_request_get_response_code_line(ev_req);
+  const char *code_line = evhttp_request_get_response_code_line(ev_req);
+  return code_line != nullptr ? code_line : "";
 #else
   return HttpStatusCode::get_default_status_text(
       evhttp_request_get_response_code(ev_req));

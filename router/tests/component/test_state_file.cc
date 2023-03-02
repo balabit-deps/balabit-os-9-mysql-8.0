@@ -700,7 +700,7 @@ TEST_F(StateFileDynamicChangesTest, EmptyMetadataServersList) {
   // proper error should get logged
   EXPECT_TRUE(wait_log_file_contains(
       router,
-      "'bootstrap_server_addresses' is the configuration file is empty "
+      "'bootstrap_server_addresses' in the configuration file is empty "
       "or not set and list of 'cluster-metadata-servers' in "
       "'dynamic_config'-file is empty, too.",
       3 * kTTL));
@@ -740,7 +740,7 @@ class StateFileSchemaTest
 /**
  * @test
  *      Verify that the proper error gets logged and the Router shuts down in
- * case of various configuration mimatches.
+ * case of various configuration mismatches.
  */
 TEST_P(StateFileSchemaTest, ParametrizedStateFileSchemaTest) {
   auto test_params = GetParam();
@@ -1125,12 +1125,11 @@ TEST_F(StateFileDirectoryBootstrapTest, DirectoryBootstrapTest) {
 
   ASSERT_NO_FATAL_FAILURE(check_exit_code(router, EXIT_SUCCESS));
 
-  // check the state file that was produced, if it constains
+  // check the state file that was produced, if it contains
   // what the bootstrap server has reported
   const std::string state_file = temp_test_dir.name() + "/data/state.json";
-  check_state_file(state_file, ClusterType::GR_V1,
-                   "00000000-0000-0000-0000-0000000000g1", {5500, 5510, 5520},
-                   0, "localhost");
+  check_state_file(state_file, ClusterType::GR_V1, "cluster-specific-id",
+                   {5500, 5510, 5520}, 0, "localhost");
 
   // check that static file has a proper reference to the dynamic file
   const std::string conf_content =
@@ -1185,14 +1184,13 @@ TEST_F(StateFileSystemBootstrapTest, SystemBootstrapTest) {
 
   ASSERT_NO_FATAL_FAILURE(check_exit_code(router, EXIT_SUCCESS));
 
-  // check the state file that was produced, if it constains
+  // check the state file that was produced, if it contains
   // what the bootstrap server has reported
   const std::string state_file =
       RouterSystemLayout::tmp_dir_ + "/stage/var/lib/mysqlrouter/state.json";
 
-  check_state_file(state_file, ClusterType::GR_V1,
-                   "00000000-0000-0000-0000-0000000000g1", {5500, 5510, 5520},
-                   0, "localhost");
+  check_state_file(state_file, ClusterType::GR_V1, "cluster-specific-id",
+                   {5500, 5510, 5520}, 0, "localhost");
 }
 
 #endif  // SKIP_BOOTSTRAP_SYSTEM_DEPLOYMENT_TESTS

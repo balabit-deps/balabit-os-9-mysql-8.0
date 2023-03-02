@@ -21,14 +21,20 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "plugin/group_replication/include/group_actions/primary_election_action.h"
-#include <plugin/group_replication/include/plugin_handlers/persistent_variables_handler.h>
 #include "plugin/group_replication/include/plugin.h"
 #include "plugin/group_replication/include/plugin_handlers/server_ongoing_transactions_handler.h"
 #include "plugin/group_replication/include/plugin_messages/group_action_message.h"
+#include "plugin/group_replication/include/services/system_variable/set_system_variable.h"
 #include "template_utils.h"
 
 Primary_election_action::Primary_election_action()
-    : Primary_election_action(std::string(""), 0) {}
+    : Primary_election_action(std::string(""), 0) {
+  if (local_member_info && local_member_info->in_primary_mode()) {
+    action_execution_mode = PRIMARY_ELECTION_ACTION_PRIMARY_SWITCH;
+  } else {
+    action_execution_mode = PRIMARY_ELECTION_ACTION_MODE_SWITCH;
+  }
+}
 
 Primary_election_action::Primary_election_action(
     std::string primary_uuid_arg, my_thread_id thread_id,
@@ -53,6 +59,11 @@ Primary_election_action::Primary_election_action(
                    &notification_lock, MY_MUTEX_INIT_FAST);
   mysql_cond_init(key_GR_COND_primary_election_action_notification,
                   &notification_cond);
+  if (local_member_info && local_member_info->in_primary_mode()) {
+    action_execution_mode = PRIMARY_ELECTION_ACTION_PRIMARY_SWITCH;
+  } else {
+    action_execution_mode = PRIMARY_ELECTION_ACTION_MODE_SWITCH;
+  }
 }
 
 Primary_election_action::~Primary_election_action() {
@@ -142,7 +153,7 @@ int Primary_election_action::process_action_message(
     return 1;
   }
 
-  if (local_member_info && local_member_info->in_primary_mode()) {
+  if (PRIMARY_ELECTION_ACTION_PRIMARY_SWITCH == action_execution_mode) {
     if (local_member_info->get_role() ==
             Group_member_info::MEMBER_ROLE_PRIMARY &&
         message.get_transaction_monitor_timeout() != -1) {
@@ -159,7 +170,7 @@ int Primary_election_action::process_action_message(
       transaction_monitor_thread = new Transaction_monitor_thread(
           message.get_transaction_monitor_timeout());
     }
-    action_execution_mode = PRIMARY_ELECTION_ACTION_PRIMARY_SWITCH;
+
     Group_member_info *primary_info =
         group_member_mgr->get_primary_member_info();
     if (primary_info != nullptr) {
@@ -170,8 +181,6 @@ int Primary_election_action::process_action_message(
       old_primary_uuid.assign(primary_info->get_uuid());
       delete primary_info;
     }
-  } else {
-    action_execution_mode = PRIMARY_ELECTION_ACTION_MODE_SWITCH;
   }
 
   /*
@@ -422,17 +431,6 @@ bool Primary_election_action::stop_action_execution(bool killed) {
   mysql_cond_broadcast(&notification_cond);
   mysql_mutex_unlock(&notification_lock);
   return false;
-}
-
-const char *Primary_election_action::get_action_name() {
-  switch (action_execution_mode) {
-    case PRIMARY_ELECTION_ACTION_PRIMARY_SWITCH:
-      return "Primary election change";
-    case PRIMARY_ELECTION_ACTION_MODE_SWITCH:
-      return "Change to single primary mode";
-    default:
-      return "Single primary related change"; /* purecov: inspected */
-  }
 }
 
 void Primary_election_action::change_action_phase(
@@ -725,32 +723,23 @@ int Primary_election_action::before_message_handling(
 }
 
 bool Primary_election_action::persist_variable_values() {
-  Sql_service_command_interface *sql_command_interface =
-      new Sql_service_command_interface();
-  long error = 0;
-  std::string var_name, var_value;
+  int error = 0;
+  Set_system_variable set_system_variable;
 
-  if ((error = sql_command_interface->establish_session_connection(
-           PSESSION_USE_THREAD, GROUPREPL_USER, get_plugin_pointer())))
+  if ((error =
+           set_system_variable
+               .set_persist_only_group_replication_enforce_update_everywhere_checks(
+                   false))) {
     goto end; /* purecov: inspected */
+  }
 
-  var_name.assign("group_replication_enforce_update_everywhere_checks");
-  var_value.assign("OFF");
-
-  if ((error = set_persist_only_variable(var_name, var_value,
-                                         sql_command_interface)))
+  if ((error =
+           set_system_variable
+               .set_persist_only_group_replication_single_primary_mode(true))) {
     goto end; /* purecov: inspected */
-
-  var_name.assign("group_replication_single_primary_mode");
-  var_value.assign("ON");
-
-  if ((error = set_persist_only_variable(var_name, var_value,
-                                         sql_command_interface)))
-
-    goto end; /* purecov: inspected */
+  }
 
 end:
-  delete sql_command_interface;
   if (error) {
     execution_message_area.set_warning_message(
         "It was not possible to persist the configuration values for this "

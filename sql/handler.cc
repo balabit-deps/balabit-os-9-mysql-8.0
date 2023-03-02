@@ -434,6 +434,22 @@ plugin_ref ha_resolve_by_name(THD *thd, const LEX_CSTRING *name,
   return nullptr;
 }
 
+bool ha_secondary_engine_supports_ddl(
+    THD *thd, const LEX_CSTRING &secondary_engine) noexcept {
+  bool ret = false;
+  auto *plugin = ha_resolve_by_name_raw(thd, secondary_engine);
+
+  if (plugin != nullptr) {
+    const auto *se_hton = plugin_data<const handlerton *>(plugin);
+    if (se_hton != nullptr) {
+      ret = secondary_engine_supports_ddl(se_hton);
+    }
+
+    plugin_unlock(thd, plugin);
+  }
+  return ret;
+}
+
 /**
   Read a comma-separated list of storage engine names. Look up each in the
   known list of canonical and legacy names. In case of a match; add both the
@@ -1390,6 +1406,75 @@ static uint ha_check_and_coalesce_trx_read_only(THD *thd,
 }
 
 /**
+  Determines whether ha_commit_low may invoke commit ordering
+
+  @param[in]  thd  Thread handle.
+  @param[in]  all  Is set in case of explicit commit
+                   (COMMIT statement), or implicit commit
+                   issued by DDL. Is not set when called
+                   at the end of statement, even if
+                   autocommit=1.
+  @retval true ha_commit_low invokes commit order
+  @retval false ha_commit_low does not invoke commit order
+  @note   Result of has_commit_order_manager() is not taken
+          into account here. the calls to
+          Commit_order_manager::wait/wait_and_finish() will be
+          no-op for threads other than replication applier threads.
+  @details Preserve externalization and persistence order for applier
+           threads. The conditions should be understood as follows:
+
+    - When the binlog is enabled and binlog local caches contain transaction
+      information, ordering is done in MYSQL_BIN_LOG::ordered_commit
+      and should be disabled here. Therefore, we have the condition
+      thd->is_current_stmt_binlog_log_replica_updates_disabled(). We also
+      enable commit ordering in case binlogging is enabled in the current
+      call to ha_commit_low (OPT_BIN_LOG bit), but caches are disabled
+      or empty (NDB). Please note that it is important to check
+      opt_bin_log in is_current_stmt_binlog_log_replica_updates_disabled,
+      because of statements such as ALTER TABLE OPTIMIZE PARTITION,
+      where the last call to trans_commit_stmt in the
+      mysql_inplace_alter_table (Implicit_substatement_guard disabled)
+      is not the last call.
+      Moreover, there are also cases in which binlog caches were
+      emptied after thread entered the ordered_commit function in the
+      MYSQL_BIN_LOG. Therefore, condition is checked in commit() function
+      and the result is assigned to the is_low_level_commit_ordering_enabled
+      flag introduced in the THD.
+
+    - This function is usually called once per statement, with
+      all=false.  We should not preserve the commit order when this
+      function is called in that context.  Therefore, we have the
+      condition ending_trans(thd, all).
+
+    - Statements such as ANALYZE/OPTIMIZE/REPAIR TABLE will call
+      ha_commit_low multiple times with all=true from within
+      mysql_admin_table, mysql_recreate_table, and
+      handle_histogram_command. After returning to
+      mysql_execute_command, it will call ha_commit_low one last
+      time.  It is only in this final call that we should preserve
+      the commit order. Therefore, we set the flag
+      thd->is_operating_substatement_implicitly while executing
+      mysql_admin_table, mysql_recreate_table, and
+      handle_histogram_command, clear it when returning from those
+      functions, and check the flag here in ha_commit_low().
+
+    - In all the above cases, we should make the current transaction
+      fail early in case a previous transaction has rolled back.
+      Therefore, we also invoke the commit order manager in case
+      get_rollback_status returns true.
+
+    Note: the calls to Commit_order_manager::wait/wait_and_finish() will be
+          no-op for threads other than replication applier threads.
+*/
+bool is_ha_commit_low_invoking_commit_order(THD *thd, bool all) {
+  return (!thd->is_operating_substatement_implicitly &&
+          !thd->is_operating_gtid_table_implicitly &&
+          (thd->is_current_stmt_binlog_log_replica_updates_disabled() ||
+           thd->is_low_level_commit_ordering_enabled()) &&
+          ending_trans(thd, all));
+}
+
+/**
   The function computes condition to call gtid persistor wrapper,
   and executes it.
   It is invoked at committing a statement or transaction, including XA,
@@ -1440,9 +1525,7 @@ std::pair<int, bool> commit_owned_gtids(THD *thd, bool all) {
     We also skip saving GTID for intermediate commits i.e. when
     thd->is_operating_substatement_implicitly is enabled.
   */
-  if (thd->is_current_stmt_binlog_log_replica_updates_disabled() &&
-      ending_trans(thd, all) && !thd->is_operating_gtid_table_implicitly &&
-      !thd->is_operating_substatement_implicitly) {
+  if (is_ha_commit_low_invoking_commit_order(thd, all)) {
     if (!has_commit_order_manager(thd) &&
         (thd->owned_gtid.sidno > 0 ||
          thd->owned_gtid.sidno == THD::OWNED_SIDNO_ANONYMOUS)) {
@@ -1782,45 +1865,7 @@ int ha_commit_low(THD *thd, bool all, bool run_after_commit) {
 
     bool is_applier_wait_enabled = false;
 
-    /*
-      Preserve externalization and persistence order for applier threads.
-
-      The conditions should be understood as follows:
-
-      - When the binlog is enabled, this will be done from
-        MYSQL_BIN_LOG::ordered_commit and should not be done here.
-        Therefore, we have the condition
-        thd->is_current_stmt_binlog_disabled().
-
-      - This function is usually called once per statement, with
-        all=false.  We should not preserve the commit order when this
-        function is called in that context.  Therefore, we have the
-        condition ending_trans(thd, all).
-
-      - Statements such as ANALYZE/OPTIMIZE/REPAIR TABLE will call
-        ha_commit_low multiple times with all=true from within
-        mysql_admin_table, mysql_recreate_table, and
-        handle_histogram_command. After returning to
-        mysql_execute_command, it will call ha_commit_low one last
-        time.  It is only in this final call that we should preserve
-        the commit order. Therefore, we set the flag
-        thd->is_operating_substatement_implicitly while executing
-        mysql_admin_table, mysql_recreate_table, and
-        handle_histogram_command, clear it when returning from those
-        functions, and check the flag here in ha_commit_low().
-
-      - In all the above cases, we should make the current transaction
-        fail early in case a previous transaction has rolled back.
-        Therefore, we also invoke the commit order manager in case
-        get_rollback_status returns true.
-
-      Note: the calls to Commit_order_manager::wait/wait_and_finish() will be
-            no-op for threads other than replication applier threads.
-    */
-    if ((!thd->is_operating_substatement_implicitly &&
-         !thd->is_operating_gtid_table_implicitly &&
-         thd->is_current_stmt_binlog_log_replica_updates_disabled() &&
-         ending_trans(thd, all)) ||
+    if (is_ha_commit_low_invoking_commit_order(thd, all) ||
         Commit_order_manager::get_rollback_status(thd)) {
       if (Commit_order_manager::wait(thd)) {
         error = 1;
@@ -3200,6 +3245,7 @@ int handler::ha_index_read_idx_map(uchar *buf, uint index, const uchar *key,
   int result;
   DBUG_TRACE;
   assert(table_share->tmp_table != NO_TMP_TABLE || m_lock_type != F_UNLCK);
+  assert(inited == NONE);
   assert(end_range == nullptr);
   assert(!pushed_idx_cond || buf == table->record[0]);
 
@@ -3214,6 +3260,7 @@ int handler::ha_index_read_idx_map(uchar *buf, uint index, const uchar *key,
     m_update_generated_read_fields = false;
   }
   table->set_row_status_from_handler(result);
+  assert(inited == NONE);
   return result;
 }
 
@@ -4327,6 +4374,12 @@ void handler::print_error(int error, myf errflag) {
     case HA_ERR_TOO_LONG_PATH:
       textno = ER_TABLE_NAME_CAUSES_TOO_LONG_PATH;
       break;
+    case HA_ERR_TOO_BIG_ROW: {
+      char errbuf[MYSQL_ERRMSG_SIZE];
+      my_error(ER_GET_ERRNO, MYF(0), HA_ERR_TOO_BIG_ROW,
+               my_strerror(errbuf, MYSQL_ERRMSG_SIZE, HA_ERR_TOO_BIG_ROW));
+    }
+      return;
     default: {
       /* The error was "unknown" to this function.
          Ask handler if it has got a message for this error */
@@ -4938,8 +4991,6 @@ int handler::ha_create(const char *name, TABLE *form, HA_CREATE_INFO *info,
 
 /**
  * Loads a table into its defined secondary storage engine: public interface.
- * This call may downgrade the table lock. Do not make any assumptions on the
- * MDL.
  *
  * @param table The table to load into the secondary engine. Its read_set tells
  * which columns to load.
@@ -6814,7 +6865,7 @@ bool DsMrr_impl::choose_mrr_impl(uint keyno, ha_rows rows, uint *flags,
                                  uint *bufsz, Cost_estimate *cost) {
   bool res;
   THD *thd = current_thd;
-  TABLE_LIST *tl = table->pos_in_table_list;
+  Table_ref *tl = table->pos_in_table_list;
   const bool mrr_on =
       hint_key_state(thd, tl, keyno, MRR_HINT_ENUM, OPTIMIZER_SWITCH_MRR);
   const bool force_dsmrr_by_hints =
@@ -8390,16 +8441,32 @@ Temp_table_handle::~Temp_table_handle() {
 */
 
 struct HTON_NOTIFY_PARAMS {
-  HTON_NOTIFY_PARAMS(const MDL_key *mdl_key, ha_notification_type mdl_type)
+  HTON_NOTIFY_PARAMS(const MDL_key *mdl_key, ha_notification_type mdl_type,
+                     ha_ddl_type ddl_type = HA_INVALID_DDL,
+                     const char *old_db_name = nullptr,
+                     const char *old_table_name = nullptr,
+                     const char *new_db_name = nullptr,
+                     const char *new_table_name = nullptr)
       : key(mdl_key),
         notification_type(mdl_type),
+        ddl_type{ddl_type},
         some_htons_were_notified(false),
-        victimized(false) {}
+        victimized(false),
+        m_old_db_name(old_db_name),
+        m_old_table_name(old_table_name),
+        m_new_db_name(new_db_name),
+        m_new_table_name(new_table_name) {}
 
   const MDL_key *key;
   const ha_notification_type notification_type;
+  const ha_ddl_type ddl_type;
   bool some_htons_were_notified;
   bool victimized;
+  /* Only used in RENAME TABLE */
+  const char *m_old_db_name;
+  const char *m_old_table_name;
+  const char *m_new_db_name;
+  const char *m_new_table_name;
 };
 
 static bool notify_exclusive_mdl_helper(THD *thd, plugin_ref plugin,
@@ -8463,12 +8530,51 @@ bool ha_notify_exclusive_mdl(THD *thd, const MDL_key *mdl_key,
   return false;
 }
 
-static bool notify_alter_table_helper(THD *thd, plugin_ref plugin, void *arg) {
+static bool notify_table_ddl_helper(THD *thd, plugin_ref plugin, void *arg) {
   handlerton *hton = plugin_data<handlerton *>(plugin);
-  if (hton->state == SHOW_OPTION_YES && hton->notify_alter_table) {
+  if (hton->state == SHOW_OPTION_YES &&
+      (hton->notify_alter_table || hton->notify_rename_table ||
+       hton->notify_truncate_table)) {
     HTON_NOTIFY_PARAMS *params = reinterpret_cast<HTON_NOTIFY_PARAMS *>(arg);
 
-    if (hton->notify_alter_table(thd, params->key, params->notification_type)) {
+    bool notify_ret{false};
+
+    /* If the DDL is ALTER or TRUNCATE, it shouldn't have the names set. */
+    assert(((params->ddl_type == HA_ALTER_DDL ||
+             params->ddl_type == HA_TRUNCATE_DDL) &&
+            (params->m_old_db_name == nullptr &&
+             params->m_old_table_name == nullptr &&
+             params->m_new_db_name == nullptr &&
+             params->m_new_table_name == nullptr)) ||
+           (params->ddl_type == HA_RENAME_DDL));
+
+    switch (params->ddl_type) {
+      case HA_ALTER_DDL:
+        if (hton->notify_alter_table) {
+          notify_ret = hton->notify_alter_table(thd, params->key,
+                                                params->notification_type);
+        }
+        break;
+      case HA_TRUNCATE_DDL:
+        if (hton->notify_truncate_table) {
+          notify_ret = hton->notify_truncate_table(thd, params->key,
+                                                   params->notification_type);
+        }
+        break;
+      case HA_RENAME_DDL:
+        if (hton->notify_rename_table) {
+          notify_ret = hton->notify_rename_table(
+              thd, params->key, params->notification_type,
+              params->m_old_db_name, params->m_old_table_name,
+              params->m_new_db_name, params->m_new_table_name);
+        }
+        break;
+      default:
+        assert(0);
+        return true;
+    }
+
+    if (notify_ret) {
       // Ignore failures from post event notification.
       if (params->notification_type == HA_NOTIFY_PRE_EVENT) return true;
     } else
@@ -8478,38 +8584,41 @@ static bool notify_alter_table_helper(THD *thd, plugin_ref plugin, void *arg) {
 }
 
 /**
-  Notify/get permission from all interested storage engines before
-  or after executed ALTER TABLE on the table identified by key.
+  Notify/get permission from all interested storage engines before or after
+  executed DDL (ALTER TABLE, RENAME TABLE, TRUNCATE TABLE) on the table
+  identified by key.
 
   @param thd                Thread context.
   @param mdl_key            MDL key identifying table.
-  @param notification_type  Indicates whether this is pre-ALTER or
-                            post-ALTER notification.
+  @param notification_type  Indicates whether this is pre-DDL or post-DDL
+  notification.
+  @param old_db_name        Old db name, used in RENAME DDL
+  @param old_table_name     Old table name, used in RENAME DDL
+  @param new_db_name        New db name, used in RENAME DDL
+  @param new_table_name     New table name, used in RENAME DDL
 
-  See @sa handlerton::notify_alter_table for rationale,
-  details about calling convention and error reporting.
+  See @sa handlerton::notify_alter_table for rationale, details about calling
+  convention and error reporting.
 
-  @return False - if notification was successful/ALTER TABLE can
-                  proceed.
-          True -  if it has failed/ALTER TABLE should fail.
+  @return False - if notification was successful/DDL can proceed.
+          True -  if it has failed/DDL should fail.
 */
+bool ha_notify_table_ddl(THD *thd, const MDL_key *mdl_key,
+                         ha_notification_type notification_type,
+                         ha_ddl_type ddl_type, const char *old_db_name,
+                         const char *old_table_name, const char *new_db_name,
+                         const char *new_table_name) {
+  HTON_NOTIFY_PARAMS params(mdl_key, notification_type, ddl_type, old_db_name,
+                            old_table_name, new_db_name, new_table_name);
 
-bool ha_notify_alter_table(THD *thd, const MDL_key *mdl_key,
-                           ha_notification_type notification_type) {
-  HTON_NOTIFY_PARAMS params(mdl_key, notification_type);
-
-  if (plugin_foreach(thd, notify_alter_table_helper,
-                     MYSQL_STORAGE_ENGINE_PLUGIN, &params)) {
-    /*
-      If some SE hasn't given its permission to do ALTER TABLE and some SEs
-      has given their permissions, we need to notify the latter group about
-      failed attemopt. We do this by calling post-ALTER TABLE notification
-      for all interested SEs unconditionally.
-    */
+  if (plugin_foreach(thd, notify_table_ddl_helper, MYSQL_STORAGE_ENGINE_PLUGIN,
+                     &params)) {
     if (notification_type == HA_NOTIFY_PRE_EVENT &&
         params.some_htons_were_notified) {
-      HTON_NOTIFY_PARAMS rollback_params(mdl_key, HA_NOTIFY_POST_EVENT);
-      (void)plugin_foreach(thd, notify_alter_table_helper,
+      HTON_NOTIFY_PARAMS rollback_params(mdl_key, HA_NOTIFY_POST_EVENT,
+                                         ddl_type, old_db_name, old_table_name,
+                                         new_db_name, new_table_name);
+      (void)plugin_foreach(thd, notify_table_ddl_helper,
                            MYSQL_STORAGE_ENGINE_PLUGIN, &rollback_params);
     }
     return true;
@@ -8580,6 +8689,13 @@ void handler::ha_set_primary_handler(handler *primary_handler) {
   assert((ht->flags & HTON_IS_SECONDARY_ENGINE) != 0);
   assert(primary_handler->table->s->has_secondary_engine());
   m_primary_handler = primary_handler;
+}
+
+const handlerton *SecondaryEngineHandlerton(const THD *thd) {
+  if (thd->lex->m_sql_cmd == nullptr) {
+    return nullptr;
+  }
+  return thd->lex->m_sql_cmd->secondary_engine();
 }
 
 /**

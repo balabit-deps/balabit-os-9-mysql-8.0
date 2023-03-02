@@ -797,7 +797,7 @@ bool Acl_table_user_writer::update_authentication_info(
       m_table->field[m_table_schema->plugin_idx()]->set_notnull();
       m_table->field[m_table_schema->authentication_string_idx()]->store(
           m_combo->first_factor_auth_info.auth.str,
-          m_combo->first_factor_auth_info.auth.length, &my_charset_utf8_bin);
+          m_combo->first_factor_auth_info.auth.length, &my_charset_utf8mb3_bin);
       m_table->field[m_table_schema->authentication_string_idx()]
           ->set_notnull();
     } else {
@@ -2362,8 +2362,8 @@ bool read_user_application_user_metadata_from_table(
                                              system_charset_info);
   key_copy(user_key, table->record[0], table->key_info,
            table->key_info->key_length);
-  if (table->file->ha_index_read_idx_map(table->record[0], 0, user_key,
-                                         HA_WHOLE_KEY, HA_READ_KEY_EXACT)) {
+  if (table->file->ha_index_read_map(table->record[0], user_key, HA_WHOLE_KEY,
+                                     HA_READ_KEY_EXACT)) {
     table->file->ha_index_end();
     return false;  // technically we fail, but result should be an empty out
                    // string

@@ -60,8 +60,9 @@ Plugin_table table_replication_applier_configuration::m_table_def(
     "    COMMENT 'User name for the security context of the applier.',\n"
     "  REQUIRE_ROW_FORMAT ENUM('YES', 'NO') not null COMMENT "
     "    'Indicates whether the channel shall only accept row based events.',\n"
-    "  REQUIRE_TABLE_PRIMARY_KEY_CHECK ENUM('STREAM','ON','OFF') not null"
-    "    COMMENT 'Indicates what is the channel policy regarding tables having"
+    "  REQUIRE_TABLE_PRIMARY_KEY_CHECK ENUM('STREAM','ON','OFF','GENERATE')"
+    " not null"
+    " COMMENT 'Indicates what is the channel policy regarding tables without"
     " primary keys on create and alter table queries',\n"
     "  ASSIGN_GTIDS_TO_ANONYMOUS_TRANSACTIONS_TYPE "
     "ENUM('OFF','LOCAL','UUID')  not null "
@@ -270,7 +271,8 @@ int table_replication_applier_configuration::read_row_values(TABLE *table,
     if (read_all || bitmap_is_set(table->read_set, f->field_index())) {
       switch (f->field_index()) {
         case 0: /**channel_name*/
-          set_field_char_utf8(f, m_row.channel_name, m_row.channel_name_length);
+          set_field_char_utf8mb4(f, m_row.channel_name,
+                                 m_row.channel_name_length);
           break;
         case 1: /** desired_delay */
           set_field_ulong(f, static_cast<ulong>(m_row.desired_delay));

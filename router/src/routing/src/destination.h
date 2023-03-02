@@ -37,6 +37,7 @@
 #include "my_compiler.h"  // MY_ATTRIBUTE
 #include "mysql/harness/net_ts/io_context.h"
 #include "mysqlrouter/destination.h"
+#include "mysqlrouter/destination_status_types.h"
 #include "mysqlrouter/routing.h"
 #include "protocol/protocol.h"
 #include "tcp_address.h"
@@ -44,16 +45,6 @@
 namespace mysql_harness {
 class PluginFuncEnv;
 }
-
-struct AvailableDestination {
-  AvailableDestination(mysql_harness::TCPAddress a, std::string i)
-      : address{std::move(a)}, id{std::move(i)} {}
-
-  mysql_harness::TCPAddress address;
-  std::string id;
-};
-
-using AllowedNodes = std::vector<AvailableDestination>;
 
 // first argument is the new set of the allowed nodes
 // second argument is a set of nodes that can be used for new connections
@@ -65,7 +56,7 @@ using AllowedNodesChangedCallback =
     std::function<void(const AllowedNodes &, const AllowedNodes &, const bool,
                        const std::string &)>;
 // NOTE: this has to be container like std::list that does not invalidate
-// iterators when it is modified as we return the iterator to the insterted
+// iterators when it is modified as we return the iterator to the inserted
 // callback to the caller to allow unregistering
 using AllowedNodesChangeCallbacksList = std::list<AllowedNodesChangedCallback>;
 using AllowedNodesChangeCallbacksListIterator =

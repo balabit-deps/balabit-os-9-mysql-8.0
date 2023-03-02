@@ -27,8 +27,6 @@
 #include <gmock/gmock.h>
 
 #ifdef RAPIDJSON_NO_SIZETYPEDEFINE
-// if we build within the server, it will set RAPIDJSON_NO_SIZETYPEDEFINE
-// globally and require to include my_rapidjson_size_t.h
 #include "my_rapidjson_size_t.h"
 #endif
 #include <rapidjson/document.h>
@@ -54,9 +52,20 @@ using namespace std::string_literals;
 using mysqlrouter::ClusterType;
 
 // for the test with no param
-class RouterClusterSetBootstrapTest : public RouterComponentBootstrapTest,
-                                      public RouterComponentClusterSetTest {
+class RouterClusterSetBootstrapTest : public RouterComponentClusterSetTest {
  protected:
+  ProcessWrapper &launch_router_for_bootstrap(
+      std::vector<std::string> params, int expected_exit_code = EXIT_SUCCESS,
+      const bool disable_rest = true,
+      ProcessWrapper::OutputResponder output_responder =
+          RouterComponentBootstrapTest::kBootstrapOutputResponder) {
+    if (disable_rest) params.push_back("--disable-rest");
+
+    return ProcessManager::launch_router(
+        params, expected_exit_code, /*catch_stderr=*/true, /*with_sudo=*/false,
+        /*wait_for_notify_ready=*/std::chrono::seconds(-1), output_responder);
+  }
+
   using NodeAddress = std::pair<std::string, uint16_t>;
   TempDirectory bootstrap_directory;
   uint64_t view_id{1};
@@ -65,7 +74,7 @@ class RouterClusterSetBootstrapTest : public RouterComponentBootstrapTest,
 struct TargetClusterTestParams {
   // which cluster from the CS should be used as a param for --bootstrap
   unsigned bootstrap_cluster_id;
-  // which node from the selected cluster hould be used as a param for
+  // which node from the selected cluster should be used as a param for
   // --bootstrap
   unsigned bootstrap_node_id;
   // what should be the value for --conf-target-cluster (if empty do not use
@@ -237,7 +246,7 @@ INSTANTIATE_TEST_SUITE_P(
         // target_cluster=UUID-OF-PRIMARY-CLUSTER
         // NOTE: since we are using "current" on the Primary cluster we expect
         // the warning on the console
-        // NOTE: also checks that the "current" option is case insesitive
+        // NOTE: also checks that the "current" option is case insensitive
         // [@FR3.1.1] [@FR3.3] [@TS_R2_1/1]
         TargetClusterTestParams{
             /*bootstrap_cluster_id*/ 0,
@@ -295,7 +304,7 @@ INSTANTIATE_TEST_SUITE_P(
         // target_cluster=UUID-OF-REPLICA-CLUSTER
         // NOTE: since this is not the PRIMARY cluster we do not expect the
         // warning now NOTE: also checks that the "current" option is case
-        // insesitive
+        // insensitive
         // [@FR3.2] [@TS_R2_1/3]
         TargetClusterTestParams{
             /*bootstrap_cluster_id*/ 1,
@@ -337,7 +346,7 @@ INSTANTIATE_TEST_SUITE_P(
 
         // we bootstrap against various ClusterSet nodes using
         // "--conf-target-cluster=primary" so we expect target_cluster=primary
-        // NOTE: also checks that the "current" option is case insesitive
+        // NOTE: also checks that the "current" option is case insensitive
         // [@FR3.2] [@FR3.3] [@TS_R3_1/1]
         TargetClusterTestParams{/*bootstrap_cluster_id*/ 0,
                                 /*bootstrap_node_id*/ 0,
@@ -526,7 +535,7 @@ INSTANTIATE_TEST_SUITE_P(
 struct BootstrapParametersErrorTestParams {
   // which cluster from the CS should be used as a param for --bootstrap
   unsigned bootstrap_cluster_id;
-  // which node from the selected cluster hould be used as a param for
+  // which node from the selected cluster should be used as a param for
   // --bootstrap
   unsigned bootstrap_node_id;
 

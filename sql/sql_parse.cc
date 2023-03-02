@@ -282,11 +282,40 @@ bool command_satisfy_acl_cache_requirement(unsigned command) {
 /**
   Returns true if all tables should be ignored.
 */
-bool all_tables_not_ok(THD *thd, TABLE_LIST *tables) {
+bool all_tables_not_ok(THD *thd, Table_ref *tables) {
   Rpl_filter *rpl_filter = thd->rli_slave->rpl_filter;
 
   return rpl_filter->is_on() && tables && !thd->sp_runtime_ctx &&
          !rpl_filter->tables_ok(thd->db().str, tables);
+}
+
+bool is_normal_transaction_boundary_stmt(enum_sql_command sql_cmd) {
+  switch (sql_cmd) {
+    case SQLCOM_BEGIN:
+    case SQLCOM_COMMIT:
+    case SQLCOM_SAVEPOINT:
+    case SQLCOM_ROLLBACK:
+    case SQLCOM_ROLLBACK_TO_SAVEPOINT:
+      return true;
+    default:
+      return false;
+  }
+
+  return false;
+}
+
+bool is_xa_transaction_boundary_stmt(enum_sql_command sql_cmd) {
+  switch (sql_cmd) {
+    case SQLCOM_XA_START:
+    case SQLCOM_XA_END:
+    case SQLCOM_XA_COMMIT:
+    case SQLCOM_XA_ROLLBACK:
+      return true;
+    default:
+      return false;
+  }
+
+  return false;
 }
 
 /**
@@ -313,27 +342,12 @@ inline bool check_database_filters(THD *thd, const char *db,
                                    enum_sql_command sql_cmd) {
   DBUG_TRACE;
   assert(thd->slave_thread);
-  if (!db) return true;
+  if (!db || is_normal_transaction_boundary_stmt(sql_cmd) ||
+      is_xa_transaction_boundary_stmt(sql_cmd))
+    return true;
+
   Rpl_filter *rpl_filter = thd->rli_slave->rpl_filter;
-
-  bool need_increase_counter = true;
-  switch (sql_cmd) {
-    case SQLCOM_BEGIN:
-    case SQLCOM_COMMIT:
-    case SQLCOM_SAVEPOINT:
-    case SQLCOM_ROLLBACK:
-    case SQLCOM_ROLLBACK_TO_SAVEPOINT:
-      return true;
-    case SQLCOM_XA_START:
-    case SQLCOM_XA_END:
-    case SQLCOM_XA_COMMIT:
-    case SQLCOM_XA_ROLLBACK:
-      need_increase_counter = false;
-    default:
-      break;
-  }
-
-  bool db_ok = rpl_filter->db_ok(db, need_increase_counter);
+  auto db_ok{rpl_filter->db_ok(db)};
   /*
     No filters exist in ignore/do_db ? Then, just check
     wild_do_table filtering for 'DATABASE' related
@@ -353,8 +367,8 @@ inline bool check_database_filters(THD *thd, const char *db,
   return db_ok;
 }
 
-bool some_non_temp_table_to_be_updated(THD *thd, TABLE_LIST *tables) {
-  for (TABLE_LIST *table = tables; table; table = table->next_global) {
+bool some_non_temp_table_to_be_updated(THD *thd, Table_ref *tables) {
+  for (Table_ref *table = tables; table; table = table->next_global) {
     assert(table->db && table->table_name);
     /*
       Update on performance_schema and temp tables are allowed
@@ -405,6 +419,65 @@ bool stmt_causes_implicit_commit(const THD *thd, uint mask) {
     default:
       return true;
   }
+}
+
+/**
+  @brief Iterates over all post replication filter actions registered and
+  executes them.
+
+  All actions registered will be executed at most once. They are executed in
+  the order that they were registered. Shall there be an error while iterating
+  through the list of actions and executing them, then the process stops and an
+  error is returned immediately. This means that in that case, some actions may
+  have executed successfully and some not. In other words, this procedure is
+  not atomic.
+
+  This function will consume all actions from the list if there is no error.
+  This means that actions run only once per statement. Should there be any
+  sub-statements then actions only run on the top level statement execution.
+
+  @param thd The thread context.
+  @return true If there was an error while executing the registered actions.
+  @return false If all actions executed successfully.
+*/
+static bool run_post_replication_filters_actions(THD *thd) {
+  DBUG_TRACE;
+  auto &actions{thd->rpl_thd_ctx.post_filters_actions()};
+  for (auto &action : actions) {
+    if (action()) return true;
+  }
+  actions.clear();
+  return false;
+}
+
+/**
+  @brief This function determines if the current statement parsed violates the
+  require_row_format check.
+
+  Given a parsed context within the THD object, this function will infer
+  whether the require row format check is violated or not. If it is, this
+  function returns true, false otherwise. Note that this function can be called
+  from both, normal sessions and replication applier, execution paths.
+
+  @param thd The session context holding the parsed statement.
+  @return true if there was a require row format validation failure.
+  @return false if the check was successful, meaning no require row format
+  validation failure.
+*/
+static bool check_and_report_require_row_format_violation(THD *thd) {
+  DBUG_TRACE;
+  assert(thd != nullptr);
+  auto perform_check{thd->slave_thread
+                         ? thd->rli_slave->is_row_format_required()
+                         : thd->variables.require_row_format};
+  if (!perform_check) return false;
+
+  if (is_require_row_format_violation(thd)) {
+    if (thd->slave_thread) thd->is_slave_error = true;
+    my_error(ER_CLIENT_QUERY_FAILURE_INVALID_NON_ROW_FORMAT, MYF(0));
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -1344,6 +1417,10 @@ bool do_command(THD *thd) {
   vio_description(net->vio, desc);
   DBUG_PRINT("info", ("Command on %s = %d (%s)", desc, command,
                       Command_names::str_notranslate(command).c_str()));
+  expected_from_debug_flag = TDM::ANY;
+  DBUG_EXECUTE_IF("tdon", { expected_from_debug_flag = TDM::ON; });
+  DBUG_EXECUTE_IF("tdzero", { expected_from_debug_flag = TDM::ZERO; });
+  DBUG_EXECUTE_IF("tdna", { expected_from_debug_flag = TDM::NOT_AVAILABLE; });
 #endif  // NDEBUG
   DBUG_PRINT("info", ("packet: '%*.s'; command: %d",
                       (int)thd->get_protocol_classic()->get_packet_length(),
@@ -1383,7 +1460,7 @@ out:
     @retval true The statement should be denied.
     @retval false The statement isn't updating any relevant tables.
 */
-static bool deny_updates_if_read_only_option(THD *thd, TABLE_LIST *all_tables) {
+static bool deny_updates_if_read_only_option(THD *thd, Table_ref *all_tables) {
   DBUG_TRACE;
 
   if (!check_readonly(thd, false)) return false;
@@ -2096,15 +2173,15 @@ bool dispatch_command(THD *thd, const COM_DATA *com_data,
       /* Must be before we init the table list. */
       if (lower_case_table_names && !is_infoschema_db(db.str, db.length))
         table_name.length = my_casedn_str(files_charset_info, table_name.str);
-      TABLE_LIST table_list(db.str, db.length, table_name.str,
-                            table_name.length, table_name.str, TL_READ);
+      Table_ref table_list(db.str, db.length, table_name.str, table_name.length,
+                           table_name.str, TL_READ);
       /*
-        Init TABLE_LIST members necessary when the undelrying
+        Init Table_ref members necessary when the undelrying
         table is view.
       */
       table_list.query_block = thd->lex->query_block;
-      thd->lex->query_block->table_list.link_in_list(&table_list,
-                                                     &table_list.next_local);
+      thd->lex->query_block->m_table_list.link_in_list(&table_list,
+                                                       &table_list.next_local);
       thd->lex->add_to_query_tables(&table_list);
 
       if (is_infoschema_db(table_list.db, table_list.db_length)) {
@@ -2135,7 +2212,7 @@ bool dispatch_command(THD *thd, const COM_DATA *com_data,
 
       mysqld_list_fields(thd, &table_list, fields);
 
-      thd->lex->cleanup(thd, true);
+      thd->lex->cleanup(true);
       /* No need to rollback statement transaction, it's not started. */
       assert(thd->get_transaction()->is_empty(Transaction_ctx::STMT));
       close_thread_tables(thd);
@@ -2215,7 +2292,7 @@ bool dispatch_command(THD *thd, const COM_DATA *com_data,
         if (res) break;
       } else
 #endif
-          if (handle_reload_request(thd, options, (TABLE_LIST *)nullptr,
+          if (handle_reload_request(thd, options, (Table_ref *)nullptr,
                                     &not_used))
         break;
       if (trans_commit_implicit(thd)) break;
@@ -2469,11 +2546,11 @@ error:
 }
 
 /**
-  Create a TABLE_LIST object for an INFORMATION_SCHEMA table.
+  Create a Table_ref object for an INFORMATION_SCHEMA table.
 
     This function is used in the parser to convert a SHOW or DESCRIBE
     table_name command to a SELECT from INFORMATION_SCHEMA.
-    It prepares a Query_block and a TABLE_LIST object to represent the
+    It prepares a Query_block and a Table_ref object to represent the
     given command as a SELECT parse tree.
 
   @param thd              thread handle
@@ -2503,7 +2580,7 @@ int prepare_schema_table(THD *thd, LEX *lex, Table_ident *table_ident,
     case SCH_TMP_TABLE_COLUMNS:
     case SCH_TMP_TABLE_KEYS: {
       assert(table_ident);
-      TABLE_LIST **query_tables_last = lex->query_tables_last;
+      Table_ref **query_tables_last = lex->query_tables_last;
       if ((schema_query_block = lex->new_empty_query_block()) == nullptr)
         return 1; /* purecov: inspected */
       if (!schema_query_block->add_table_to_list(thd, table_ident, nullptr, 0,
@@ -2536,7 +2613,7 @@ int prepare_schema_table(THD *thd, LEX *lex, Table_ident *table_ident,
   if (make_schema_query_block(thd, query_block, schema_table_idx)) {
     return 1;
   }
-  TABLE_LIST *table_list = query_block->table_list.first;
+  Table_ref *table_list = query_block->get_table_list();
   table_list->schema_query_block = schema_query_block;
   table_list->schema_table_reformed = true;
   return 0;
@@ -2557,6 +2634,7 @@ int prepare_schema_table(THD *thd, LEX *lex, Table_ident *table_ident,
 */
 
 bool alloc_query(THD *thd, const char *packet, size_t packet_length) {
+  DBUG_TRACE;
   /* Remove garbage at start and end of query */
   while (packet_length > 0 && my_isspace(thd->charset(), packet[0])) {
     packet++;
@@ -2575,7 +2653,8 @@ bool alloc_query(THD *thd, const char *packet, size_t packet_length) {
   query[packet_length] = '\0';
 
   thd->set_query(query, packet_length);
-
+  DBUG_PRINT("thd_query", ("thd->thread_id():%u thd:%p query:%s",
+                           thd->thread_id(), thd, query));
   return false;
 }
 
@@ -2663,12 +2742,12 @@ static bool sp_process_definer(THD *thd) {
   @return false in case of success, true in case of error.
 */
 
-static bool lock_tables_open_and_lock_tables(THD *thd, TABLE_LIST *tables) {
+static bool lock_tables_open_and_lock_tables(THD *thd, Table_ref *tables) {
   Lock_tables_prelocking_strategy lock_tables_prelocking_strategy;
   MDL_deadlock_and_lock_abort_error_handler deadlock_handler;
   MDL_savepoint mdl_savepoint = thd->mdl_context.mdl_savepoint();
   uint counter;
-  TABLE_LIST *table;
+  Table_ref *table;
 
   thd->in_lock_tables = true;
 
@@ -2689,8 +2768,8 @@ retry:
           TABLES time and by the statement which is later executed under LOCK
           TABLES we ensure that for temporary tables we always request a write
           lock (such discrepancy can cause problems for the storage engine).
-          We don't set TABLE_LIST::lock_type in this case as this might result
-          in extra warnings from THD::decide_logging_format() even though
+          We don't set Table_ref::lock_type in this case as this might
+          result in extra warnings from THD::decide_logging_format() even though
           binary logging is totally irrelevant for LOCK TABLES.
         */
         table->table->reginfo.lock_type = TL_WRITE;
@@ -2839,9 +2918,9 @@ int mysql_execute_command(THD *thd, bool first_level) {
   /* first Query_block (have special meaning for many of non-SELECTcommands) */
   Query_block *const query_block = lex->query_block;
   /* first table of first Query_block */
-  TABLE_LIST *const first_table = query_block->get_table_list();
+  Table_ref *const first_table = query_block->get_table_list();
   /* list of all tables in query */
-  TABLE_LIST *all_tables;
+  Table_ref *all_tables;
   // keep GTID violation state in order to roll it back on statement failure
   bool gtid_consistency_violation_state = thd->has_gtid_consistency_violation;
   assert(query_block->master_query_expression() == lex->unit);
@@ -2968,6 +3047,10 @@ int mysql_execute_command(THD *thd, bool first_level) {
     res_grp_name[0] = '\0';
   }
 
+  if (unlikely(thd->get_protocol()->has_client_capability(CLIENT_NO_SCHEMA))) {
+    push_warning(thd, ER_WARN_DEPRECATED_CLIENT_NO_SCHEMA_OPTION);
+  }
+
   if (unlikely(thd->slave_thread)) {
     if (!check_database_filters(thd, thd->db().str, lex->sql_command)) {
       binlog_gtid_end_transaction(thd);
@@ -2979,7 +3062,7 @@ int mysql_execute_command(THD *thd, bool first_level) {
         When dropping a trigger, we need to load its table name
         before checking slave filter rules.
       */
-      TABLE_LIST *trigger_table = nullptr;
+      Table_ref *trigger_table = nullptr;
       (void)get_table_for_trigger(thd, lex->spname->m_db, lex->spname->m_name,
                                   true, &trigger_table);
       if (trigger_table != nullptr) {
@@ -3018,7 +3101,7 @@ int mysql_execute_command(THD *thd, bool first_level) {
     if (lex->sql_command == SQLCOM_UPDATE_MULTI && thd->table_map_for_update) {
       table_map table_map_for_update = thd->table_map_for_update;
       uint nr = 0;
-      TABLE_LIST *table;
+      Table_ref *table;
       for (table = all_tables; table; table = table->next_global, nr++) {
         if (table_map_for_update & ((table_map)1 << nr))
           table->updating = true;
@@ -3098,7 +3181,7 @@ int mysql_execute_command(THD *thd, bool first_level) {
   Opt_trace_array trace_command_steps(&thd->opt_trace, "steps");
 
   if (lex->m_sql_cmd && lex->m_sql_cmd->owner())
-    lex->m_sql_cmd->owner()->trace_parameter_types();
+    lex->m_sql_cmd->owner()->trace_parameter_types(thd);
 
   assert(thd->get_transaction()->cannot_safely_rollback(
              Transaction_ctx::STMT) == false);
@@ -3114,12 +3197,9 @@ int mysql_execute_command(THD *thd, bool first_level) {
       return 0;
   }
 
-  if (thd->variables.require_row_format) {
-    if (evaluate_command_row_only_restrictions(thd)) {
-      my_error(ER_CLIENT_QUERY_FAILURE_INVALID_NON_ROW_FORMAT, MYF(0));
-      return -1;
-    }
-  }
+  if (check_and_report_require_row_format_violation(thd) ||
+      run_post_replication_filters_actions(thd))
+    return -1;
 
   /*
     End a active transaction so that this command will have it's
@@ -3517,7 +3597,7 @@ int mysql_execute_command(THD *thd, bool first_level) {
     }
     case SQLCOM_RENAME_TABLE: {
       assert(first_table == all_tables && first_table != nullptr);
-      TABLE_LIST *table;
+      Table_ref *table;
       for (table = first_table; table; table = table->next_local->next_local) {
         if (check_access(thd, ALTER_ACL | DROP_ACL, table->db,
                          &table->grant.privilege, &table->grant.m_internal,
@@ -3527,8 +3607,8 @@ int mysql_execute_command(THD *thd, bool first_level) {
                          &table->next_local->grant.m_internal, false, false))
           goto error;
 
-        TABLE_LIST old_list = table[0];
-        TABLE_LIST new_list = table->next_local[0];
+        Table_ref old_list = table[0];
+        Table_ref new_list = table->next_local[0];
         /*
           It's not clear what the above assignments actually want to
           accomplish. What we do know is that they do *not* want to copy the MDL
@@ -3796,6 +3876,10 @@ int mysql_execute_command(THD *thd, bool first_level) {
                    "function calls as part of this statement");
           break;
         }
+
+        // Use the hypergraph optimizer if it's enabled.
+        lex->using_hypergraph_optimizer =
+            thd->optimizer_switch_flag(OPTIMIZER_SWITCH_HYPERGRAPH_OPTIMIZER);
 
         res = sp_process_definer(thd);
         if (res) break;
@@ -4820,7 +4904,7 @@ finish:
     }
   }
 
-  lex->cleanup(thd, true);
+  lex->cleanup(true);
 
   /* Free tables */
   THD_STAGE_INFO(thd, stage_closing_tables);
@@ -4950,7 +5034,7 @@ finish:
 
 bool show_precheck(THD *thd, LEX *lex, bool lock [[maybe_unused]]) {
   assert(lex->sql_command == SQLCOM_SHOW_CREATE_USER);
-  TABLE_LIST *const tables = lex->query_tables;
+  Table_ref *const tables = lex->query_tables;
   if (tables != nullptr) {
     if (check_table_access(thd, SELECT_ACL, tables, false, UINT_MAX, false))
       return true;
@@ -5115,6 +5199,9 @@ void dispatch_sql_command(THD *thd, Parser_state *parser_state) {
   DBUG_EXECUTE_IF("parser_debug", turn_parser_debug_on(););
 
   mysql_reset_thd_for_next_command(thd);
+  // It is possible that rewritten query may not be empty (in case of
+  // multiqueries). So reset it.
+  thd->reset_rewritten_query();
   lex_start(thd);
 
   thd->m_parser_state = parser_state;
@@ -5130,12 +5217,24 @@ void dispatch_sql_command(THD *thd, Parser_state *parser_state) {
   const char *found_semicolon = nullptr;
 
   bool err = thd->get_stmt_da()->is_error();
+  size_t qlen = 0;
 
   if (!err) {
     err = parse_sql(thd, parser_state, nullptr);
     if (!err) err = invoke_post_parse_rewrite_plugins(thd, false);
 
     found_semicolon = parser_state->m_lip.found_semicolon;
+    qlen = found_semicolon ? (found_semicolon - thd->query().str)
+                           : thd->query().length;
+    /*
+      We set thd->query_length correctly to not log several queries, when we
+      execute only first. We set it to not see the ';' otherwise it would get
+      into binlog and Query_log_event::print() would give ';;' output.
+    */
+
+    if (!thd->is_error() && found_semicolon && (ulong)(qlen)) {
+      thd->set_query(thd->query().str, qlen - 1);
+    }
   }
 
   DEBUG_SYNC_C("sql_parse_before_rewrite");
@@ -5176,9 +5275,6 @@ void dispatch_sql_command(THD *thd, Parser_state *parser_state) {
                                        thd->rewritten_query().ptr(),
                                        thd->rewritten_query().length());
       else {
-        size_t qlen = found_semicolon ? (found_semicolon - thd->query().str)
-                                      : thd->query().length;
-
         query_logger.general_log_write(thd, COM_QUERY, thd->query().str, qlen);
       }
     }
@@ -5196,19 +5292,6 @@ void dispatch_sql_command(THD *thd, Parser_state *parser_state) {
         thd->get_protocol_classic()->get_net()->error = NET_ERROR_UNSET;
     } else {
       if (!thd->is_error()) {
-        /*
-          Binlog logs a string starting from thd->query and having length
-          thd->query_length; so we set thd->query_length correctly (to not
-          log several statements in one event, when we executed only first).
-          We set it to not see the ';' (otherwise it would get into binlog
-          and Query_log_event::print() would give ';;' output).
-          This also helps display only the current query in SHOW
-          PROCESSLIST.
-        */
-        if (found_semicolon && (ulong)(found_semicolon - thd->query().str))
-          thd->set_query(
-              thd->query().str,
-              static_cast<size_t>(found_semicolon - thd->query().str - 1));
         /* Actually execute the query */
         if (found_semicolon) {
           lex->safe_to_cache_query = false;
@@ -5316,7 +5399,7 @@ bool mysql_test_parse_for_slave(THD *thd) {
     thd->m_digest = nullptr;
     thd->m_statement_psi = nullptr;
     if (parse_sql(thd, &parser_state, nullptr) == 0) {
-      if (all_tables_not_ok(thd, lex->query_block->table_list.first))
+      if (all_tables_not_ok(thd, lex->query_block->get_table_list()))
         ignorable = true;
       else if (!check_database_filters(thd, thd->db().str, lex->sql_command))
         ignorable = true;
@@ -5589,14 +5672,14 @@ bool PT_common_table_expr::make_subquery_node(THD *thd, PT_subquery **node) {
 
    @param          thd      Thread handler
    @param[out]     table_name Identifier
-   @param[in,out]  tl       TABLE_LIST for the identifier
+   @param[in,out]  tl       Table_ref for the identifier
    @param          pc       Current parsing context, if available
    @param[out]     found    Is set to true if found.
 
    @returns true if error (OOM).
 */
 bool Query_block::find_common_table_expr(THD *thd, Table_ident *table_name,
-                                         TABLE_LIST *tl, Parse_context *pc,
+                                         Table_ref *tl, Parse_context *pc,
                                          bool *found) {
   *found = false;
   if (!pc) return false;
@@ -5614,7 +5697,7 @@ bool Query_block::find_common_table_expr(THD *thd, Table_ident *table_name,
       If no match in the WITH clause of 'select', maybe this is a subquery, so
       look up in the outer query's WITH clause:
     */
-  } while (cte == nullptr && (select = unit->outer_query_block()));
+  } while (cte == nullptr && (select = select->outer_query_block()));
 
   if (cte == nullptr) return false;
   *found = true;
@@ -5641,15 +5724,14 @@ bool Query_block::find_common_table_expr(THD *thd, Table_ident *table_name,
   auto wc_save = wc->enter_parsing_definition(tl);
 
   /*
-    The proper outer context for the CTE, is not the query block where the CTE
-    reference is; neither is it the outer query block of this. It is the query
-    block which immediately contains the query expression where the CTE
-    definition is. Indeed, per the standard, evaluation of the CTE happens
-    as first step of evaluation of the said query expression; so the CTE may
-    not contain references into the said query expression.
+    The outer context for the CTE is the current context of the query block
+    that immediately contains the query expression that contains the CTE
+    definition, which is the same as the outer context of the query block
+    belonging to that query expression. Unless the CTE is contained in
+    the outermost query expression, in which case there is no outer context.
   */
-  thd->lex->push_context(unit->outer_query_block()
-                             ? &unit->outer_query_block()->context
+  thd->lex->push_context(select->outer_query_block() != nullptr
+                             ? select->context.outer_context
                              : nullptr);
   assert(thd->lex->will_contextualize);
   if (node->contextualize(pc)) return true;
@@ -5674,7 +5756,7 @@ bool Query_block::find_common_table_expr(THD *thd, Table_ident *table_name,
   return false;
 }
 
-bool PT_with_clause::lookup(TABLE_LIST *tl, PT_common_table_expr **found) {
+bool PT_with_clause::lookup(Table_ref *tl, PT_common_table_expr **found) {
   *found = nullptr;
   assert(tl->query_block != nullptr);
   /*
@@ -5755,7 +5837,7 @@ bool PT_with_clause::lookup(TABLE_LIST *tl, PT_common_table_expr **found) {
   return false;
 }
 
-bool PT_common_table_expr::match_table_ref(TABLE_LIST *tl, bool in_self,
+bool PT_common_table_expr::match_table_ref(Table_ref *tl, bool in_self,
                                            bool *found) {
   *found = false;
   if (tl->table_name_length == m_name.length &&
@@ -5801,17 +5883,17 @@ bool PT_common_table_expr::match_table_ref(TABLE_LIST *tl, bool in_self,
   @param option         Used by cache index
   @param pc             Current parsing context, if available.
 
-  @return Pointer to TABLE_LIST element added to the total table list
+  @return Pointer to Table_ref element added to the total table list
   @retval
       0		Error
 */
 
-TABLE_LIST *Query_block::add_table_to_list(
+Table_ref *Query_block::add_table_to_list(
     THD *thd, Table_ident *table_name, const char *alias, ulong table_options,
     thr_lock_type lock_type, enum_mdl_type mdl_type,
     List<Index_hint> *index_hints_arg, List<String> *partition_names,
     LEX_STRING *option, Parse_context *pc) {
-  TABLE_LIST *previous_table_ref =
+  Table_ref *previous_table_ref =
       nullptr; /* The table preceding the current one. */
   LEX *lex = thd->lex;
   DBUG_TRACE;
@@ -5847,7 +5929,7 @@ TABLE_LIST *Query_block::add_table_to_list(
       return nullptr;
   }
 
-  TABLE_LIST *ptr = new (thd->mem_root) TABLE_LIST;
+  Table_ref *ptr = new (thd->mem_root) Table_ref;
   if (ptr == nullptr) return nullptr; /* purecov: inspected */
 
   if (lower_case_table_names && table_name->table.length)
@@ -5963,11 +6045,10 @@ TABLE_LIST *Query_block::add_table_to_list(
   ptr->option = option ? option->str : nullptr;
   /* check that used name is unique */
   if (lock_type != TL_IGNORE) {
-    TABLE_LIST *first_table = table_list.first;
+    Table_ref *first_table = get_table_list();
     if (lex->sql_command == SQLCOM_CREATE_VIEW)
       first_table = first_table ? first_table->next_local : nullptr;
-    for (TABLE_LIST *tables = first_table; tables;
-         tables = tables->next_local) {
+    for (Table_ref *tables = first_table; tables; tables = tables->next_local) {
       if (!my_strcasecmp(table_alias_charset, alias_str, tables->alias) &&
           !strcmp(ptr->db, tables->db)) {
         my_error(ER_NONUNIQ_TABLE, MYF(0), alias_str); /* purecov: tested */
@@ -5976,20 +6057,20 @@ TABLE_LIST *Query_block::add_table_to_list(
     }
   }
   /* Store the table reference preceding the current one. */
-  if (table_list.elements > 0) {
+  if (m_table_list.elements > 0) {
     /*
-      table_list.next points to the last inserted TABLE_LIST->next_local'
+      table_list.next points to the last inserted Table_ref->next_local'
       element
       We don't use the offsetof() macro here to avoid warnings from gcc
     */
     previous_table_ref =
-        (TABLE_LIST *)((char *)table_list.next -
-                       ((char *)&(ptr->next_local) - (char *)ptr));
+        (Table_ref *)((char *)m_table_list.next -
+                      ((char *)&(ptr->next_local) - (char *)ptr));
     /*
       Set next_name_resolution_table of the previous table reference to point
       to the current table reference. In effect the list
-      TABLE_LIST::next_name_resolution_table coincides with
-      TABLE_LIST::next_local. Later this may be changed in
+      Table_ref::next_name_resolution_table coincides with
+      Table_ref::next_local. Later this may be changed in
       store_top_level_join_columns() for NATURAL/USING joins.
     */
     previous_table_ref->next_name_resolution_table = ptr;
@@ -6001,7 +6082,7 @@ TABLE_LIST *Query_block::add_table_to_list(
     previous table reference to 'ptr'. Here we also add one element to the
     list 'table_list'.
   */
-  table_list.link_in_list(ptr, &ptr->next_local);
+  m_table_list.link_in_list(ptr, &ptr->next_local);
   ptr->next_name_resolution_table = nullptr;
   ptr->partition_names = partition_names;
   /* Link table in global list (all used tables) */
@@ -6054,7 +6135,7 @@ TABLE_LIST *Query_block::add_table_to_list(
 /**
   Initialize a new table list for a nested join.
 
-    The function initializes a structure of the TABLE_LIST type
+    The function initializes a structure of the Table_ref type
     for a nested join. It sets up its nested join list as empty.
     The created structure is added to the front of the current
     join list in the Query_block object. Then the function
@@ -6073,13 +6154,13 @@ TABLE_LIST *Query_block::add_table_to_list(
 bool Query_block::init_nested_join(THD *thd) {
   DBUG_TRACE;
 
-  TABLE_LIST *const ptr = TABLE_LIST::new_nested_join(
-      thd->mem_root, "(nested_join)", embedding, join_list, this);
+  Table_ref *const ptr = Table_ref::new_nested_join(
+      thd->mem_root, "(nested_join)", embedding, m_current_table_nest, this);
   if (ptr == nullptr) return true;
 
-  join_list->push_front(ptr);
+  m_current_table_nest->push_front(ptr);
   embedding = ptr;
-  join_list = &ptr->nested_join->join_list;
+  m_current_table_nest = &ptr->nested_join->m_tables;
 
   return false;
 }
@@ -6092,29 +6173,30 @@ bool Query_block::init_nested_join(THD *thd) {
     moves it one level up, eliminating the nest.
 
   @return
-    - Pointer to TABLE_LIST element added to the total table list, if success
+    - Pointer to Table_ref element added to the total table list, if
+  success
     - 0, otherwise
 */
 
-TABLE_LIST *Query_block::end_nested_join() {
-  TABLE_LIST *ptr;
+Table_ref *Query_block::end_nested_join() {
+  Table_ref *ptr;
   NESTED_JOIN *nested_join;
   DBUG_TRACE;
 
   assert(embedding);
   ptr = embedding;
-  join_list = ptr->join_list;
+  m_current_table_nest = ptr->join_list;
   embedding = ptr->embedding;
   nested_join = ptr->nested_join;
-  if (nested_join->join_list.size() == 1) {
-    TABLE_LIST *embedded = nested_join->join_list.front();
-    join_list->pop_front();
-    embedded->join_list = join_list;
+  if (nested_join->m_tables.size() == 1) {
+    Table_ref *embedded = nested_join->m_tables.front();
+    m_current_table_nest->pop_front();
+    embedded->join_list = m_current_table_nest;
     embedded->embedding = embedding;
-    join_list->push_front(embedded);
+    m_current_table_nest->push_front(embedded);
     ptr = embedded;
-  } else if (nested_join->join_list.empty()) {
-    join_list->pop_front();
+  } else if (nested_join->m_tables.empty()) {
+    m_current_table_nest->pop_front();
     ptr = nullptr;  // return value
   }
   return ptr;
@@ -6123,20 +6205,20 @@ TABLE_LIST *Query_block::end_nested_join() {
 /**
   Plumbing for nest_last_join, q.v.
 */
-TABLE_LIST *nest_join(THD *thd, Query_block *select, TABLE_LIST *embedding,
-                      mem_root_deque<TABLE_LIST *> *jlist, size_t table_cnt,
-                      const char *legend) {
+Table_ref *nest_join(THD *thd, Query_block *select, Table_ref *embedding,
+                     mem_root_deque<Table_ref *> *jlist, size_t table_cnt,
+                     const char *legend) {
   DBUG_TRACE;
 
-  TABLE_LIST *const ptr = TABLE_LIST::new_nested_join(thd->mem_root, legend,
-                                                      embedding, jlist, select);
+  Table_ref *const ptr = Table_ref::new_nested_join(thd->mem_root, legend,
+                                                    embedding, jlist, select);
   if (ptr == nullptr) return nullptr;
 
-  mem_root_deque<TABLE_LIST *> *const embedded_list =
-      &ptr->nested_join->join_list;
+  mem_root_deque<Table_ref *> *const embedded_list =
+      &ptr->nested_join->m_tables;
 
   for (uint i = 0; i < table_cnt; i++) {
-    TABLE_LIST *table = jlist->front();
+    Table_ref *table = jlist->front();
     jlist->pop_front();
     table->join_list = embedded_list;
     table->embedding = ptr;
@@ -6158,13 +6240,13 @@ TABLE_LIST *nest_join(THD *thd, Query_block *select, TABLE_LIST *embedding,
   @param table_cnt   2 for regular joins: t1 JOIN t2.
                      N for the MySQL join-like extension: (t1, t2, ... tN).
 
-  @return Pointer to TABLE_LIST element created for the new nested join
+  @return Pointer to Table_ref element created for the new nested join
   @retval
     0  Error
 */
 
-TABLE_LIST *Query_block::nest_last_join(THD *thd, size_t table_cnt) {
-  return nest_join(thd, this, embedding, join_list, table_cnt,
+Table_ref *Query_block::nest_last_join(THD *thd, size_t table_cnt) {
+  return nest_join(thd, this, embedding, m_current_table_nest, table_cnt,
                    "(nest_last_join)");
 }
 
@@ -6181,16 +6263,16 @@ TABLE_LIST *Query_block::nest_last_join(THD *thd, size_t table_cnt) {
   @returns false if success, true if error (OOM).
 */
 
-bool Query_block::add_joined_table(TABLE_LIST *table) {
+bool Query_block::add_joined_table(Table_ref *table) {
   DBUG_TRACE;
-  join_list->push_front(table);
-  table->join_list = join_list;
+  m_current_table_nest->push_front(table);
+  table->join_list = m_current_table_nest;
   table->embedding = embedding;
   return false;
 }
 
 void Query_block::set_lock_for_table(const Lock_descriptor &descriptor,
-                                     TABLE_LIST *table) {
+                                     Table_ref *table) {
   thr_lock_type lock_type = descriptor.type;
   bool for_update = lock_type >= TL_READ_NO_INSERT;
   enum_mdl_type mdl_type = mdl_type_for_dml(lock_type);
@@ -6216,64 +6298,8 @@ void Query_block::set_lock_for_tables(thr_lock_type lock_type) {
   DBUG_TRACE;
   DBUG_PRINT("enter", ("lock_type: %d  for_update: %d", lock_type,
                        lock_type >= TL_READ_NO_INSERT));
-  for (TABLE_LIST *table = table_list.first; table; table = table->next_local)
+  for (Table_ref *table = m_table_list.first; table; table = table->next_local)
     set_lock_for_table({lock_type, THR_WAIT}, table);
-}
-
-/**
-  Create a fake Query_block for a unit.
-
-    The method create a fake Query_block object for a unit.
-    This object is created for any union construct containing a union
-    operation and also for any single select union construct of the form
-    @verbatim
-    (SELECT ... ORDER BY order_list [LIMIT n]) ORDER BY ...
-    @endverbatim
-    or of the form
-    @verbatim
-    (SELECT ... ORDER BY LIMIT n) ORDER BY ...
-    @endverbatim
-
-  @param thd       thread handle
-
-  @note
-    The object is used to retrieve rows from the temporary table
-    where the result on the union is obtained.
-
-  @retval
-    1     on failure to create the object
-  @retval
-    0     on success
-*/
-
-bool Query_expression::add_fake_query_block(THD *thd) {
-  Query_block *first_qb = first_query_block();
-  DBUG_TRACE;
-  assert(!fake_query_block);
-
-  if (!(fake_query_block = thd->lex->new_empty_query_block()))
-    return true; /* purecov: inspected */
-  fake_query_block->include_standalone(this, &fake_query_block);
-  fake_query_block->select_number = INT_MAX;
-  fake_query_block->linkage = GLOBAL_OPTIONS_TYPE;
-  fake_query_block->select_limit = nullptr;
-
-  fake_query_block->set_context(first_qb->context.outer_context);
-
-  /* allow item list resolving in fake select for ORDER BY */
-  fake_query_block->context.resolve_in_select_list = true;
-
-  if (!is_union()) {
-    /*
-      This works only for
-      (SELECT ... ORDER BY list [LIMIT n]) ORDER BY order_list [LIMIT m],
-      (SELECT ... LIMIT n) ORDER BY order_list [LIMIT m]
-      just before the parser starts processing order_list
-    */
-    fake_query_block->no_table_names_allowed = true;
-  }
-  thd->lex->pop_context();
-  return false;
 }
 
 /**
@@ -6295,8 +6321,8 @@ bool Query_expression::add_fake_query_block(THD *thd) {
     true   if a memory allocation error occurred
 */
 
-bool push_new_name_resolution_context(Parse_context *pc, TABLE_LIST *left_op,
-                                      TABLE_LIST *right_op) {
+bool push_new_name_resolution_context(Parse_context *pc, Table_ref *left_op,
+                                      Table_ref *right_op) {
   THD *thd = pc->thd;
   Name_resolution_context *on_context;
   if (!(on_context = new (thd->mem_root) Name_resolution_context)) return true;
@@ -6323,7 +6349,7 @@ bool push_new_name_resolution_context(Parse_context *pc, TABLE_LIST *left_op,
   @param expr  the condition to be added to the ON clause
 */
 
-void add_join_on(TABLE_LIST *b, Item *expr) {
+void add_join_on(Table_ref *b, Item *expr) {
   if (expr) {
     b->set_join_cond_optim((Item *)1);  // m_join_cond_optim is not ready
     if (!b->join_cond())
@@ -6368,6 +6394,7 @@ static uint kill_one_thread(THD *thd, my_thread_id id, bool only_kill_query) {
 
   DBUG_TRACE;
   DBUG_PRINT("enter", ("id=%u only_kill=%d", id, only_kill_query));
+  DEBUG_SYNC(thd, "kill_thd_begin");
   THD_ptr tmp = Global_THD_manager::get_instance()->find_thd(&find_thd_with_id);
   Security_context *sctx = thd->security_context();
   if (tmp) {
@@ -6434,7 +6461,8 @@ static void sql_kill(THD *thd, my_thread_id id, bool only_kill_query) {
 
 /**
   This class implements callback function used by killall_non_super_threads
-  to kill all threads that do not have the SUPER privilege
+  to kill all threads that do not have either SYSTEM_VARIABLES_ADMIN +
+  CONNECTION_ADMIN privileges or legacy SUPER privilege
 */
 
 class Kill_non_super_conn : public Do_THD_Impl {
@@ -6446,9 +6474,10 @@ class Kill_non_super_conn : public Do_THD_Impl {
  public:
   Kill_non_super_conn(THD *thd) : m_client_thd(thd) {
     assert(m_client_thd->security_context()->check_access(SUPER_ACL) ||
-           m_client_thd->security_context()
-               ->has_global_grant(STRING_WITH_LEN("SYSTEM_VARIABLES_ADMIN"))
-               .first);
+           (m_client_thd->is_connection_admin() &&
+            m_client_thd->security_context()
+                ->has_global_grant(STRING_WITH_LEN("SYSTEM_VARIABLES_ADMIN"))
+                .first));
     m_is_client_regular_user = !m_client_thd->is_system_user();
   }
 
@@ -6640,7 +6669,7 @@ Item *all_any_subquery_creator(Item *left_expr,
 */
 
 void create_table_set_open_action_and_adjust_tables(LEX *lex) {
-  TABLE_LIST *create_table = lex->query_tables;
+  Table_ref *create_table = lex->query_tables;
 
   if (lex->create_info->options & HA_LEX_CREATE_TMP_TABLE)
     create_table->open_type = OT_TEMPORARY_ONLY;

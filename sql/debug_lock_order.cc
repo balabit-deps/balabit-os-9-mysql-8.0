@@ -2483,7 +2483,7 @@ class LO_rwlock {
 class LO_rwlock_pr : public LO_rwlock {
  public:
   LO_rwlock_pr(const LO_rwlock_class_pr *klass) : LO_rwlock(klass) {}
-  ~LO_rwlock_pr() {}
+  ~LO_rwlock_pr() override {}
 
   virtual LO_rwlock_lock *build_lock(const char *src_file, int src_line,
                                      LO_thread *thread) override;
@@ -2492,7 +2492,7 @@ class LO_rwlock_pr : public LO_rwlock {
 class LO_rwlock_rw : public LO_rwlock {
  public:
   LO_rwlock_rw(const LO_rwlock_class_rw *klass) : LO_rwlock(klass) {}
-  ~LO_rwlock_rw() {}
+  ~LO_rwlock_rw() override {}
 
   virtual LO_rwlock_lock *build_lock(const char *src_file, int src_line,
                                      LO_thread *thread) override;
@@ -2501,7 +2501,7 @@ class LO_rwlock_rw : public LO_rwlock {
 class LO_rwlock_sx : public LO_rwlock {
  public:
   LO_rwlock_sx(const LO_rwlock_class_sx *klass) : LO_rwlock(klass) {}
-  ~LO_rwlock_sx() {}
+  ~LO_rwlock_sx() override {}
 
   virtual LO_rwlock_lock *build_lock(const char *src_file, int src_line,
                                      LO_thread *thread) override;
@@ -2570,7 +2570,7 @@ class LO_rwlock_lock_pr : public LO_rwlock_lock {
  public:
   LO_rwlock_lock_pr(LO_rwlock *rwlock, const char *src_file, int src_line,
                     LO_thread *thread);
-  ~LO_rwlock_lock_pr() {}
+  ~LO_rwlock_lock_pr() override {}
 
   virtual void set_locked(PSI_rwlock_operation op, const char *src_file,
                           int src_line) override;
@@ -2597,7 +2597,7 @@ class LO_rwlock_lock_rw : public LO_rwlock_lock {
  public:
   LO_rwlock_lock_rw(LO_rwlock *rwlock, const char *src_file, int src_line,
                     LO_thread *thread);
-  ~LO_rwlock_lock_rw() {}
+  ~LO_rwlock_lock_rw() override {}
 
   virtual void set_locked(PSI_rwlock_operation op, const char *src_file,
                           int src_line) override;
@@ -2624,7 +2624,7 @@ class LO_rwlock_lock_sx : public LO_rwlock_lock {
  public:
   LO_rwlock_lock_sx(LO_rwlock *rwlock, const char *src_file, int src_line,
                     LO_thread *thread);
-  ~LO_rwlock_lock_sx() {}
+  ~LO_rwlock_lock_sx() override {}
 
   virtual void set_locked(PSI_rwlock_operation op, const char *src_file,
                           int src_line) override;
@@ -7889,7 +7889,7 @@ static void *lo_get_idle_interface(int version) {
 
 struct PSI_idle_bootstrap LO_idle_bootstrap = {lo_get_idle_interface};
 
-PSI_statement_service_v3 LO_statement_v3 = {
+PSI_statement_service_v4 LO_statement_v4 = {
     lo_register_statement,
     lo_get_thread_statement_locker,
     lo_refine_statement,
@@ -7932,9 +7932,10 @@ static void *lo_get_statement_interface(int version) {
   switch (version) {
     case PSI_STATEMENT_VERSION_1:
     case PSI_STATEMENT_VERSION_2:
-      return nullptr;
     case PSI_STATEMENT_VERSION_3:
-      return &LO_statement_v3;
+      return nullptr;
+    case PSI_STATEMENT_VERSION_4:
+      return &LO_statement_v4;
     default:
       return nullptr;
   }
