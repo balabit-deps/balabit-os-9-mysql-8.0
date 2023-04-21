@@ -1,3 +1,17 @@
+mysql-8.0 (8.0.33-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.33 to fix security issues
+    - CVE-2023-21911, CVE-2023-21919, CVE-2023-21920, CVE-2023-21929,
+      CVE-2023-21933, CVE-2023-21935, CVE-2023-21940, CVE-2023-21945,
+      CVE-2023-21946, CVE-2023-21947, CVE-2023-21953, CVE-2023-21955,
+      CVE-2023-21962, CVE-2023-21966, CVE-2023-21972, CVE-2023-21976,
+      CVE-2023-21977, CVE-2023-21980, CVE-2023-21982
+    - debian/*.install: Added new files.
+    - d/p/revert-router-to-8.0.31/*.patch: removed, no longer needed with
+      new version.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Fri, 21 Apr 2023 10:17:04 -0400
+
 mysql-8.0 (8.0.32-0ubuntu0.22.04.2) jammy-security; urgency=medium
 
   * SECURITY REGRESSION: Regression with PyMySQL (LP: #2003835)

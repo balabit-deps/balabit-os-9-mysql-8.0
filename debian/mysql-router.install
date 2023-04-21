@@ -10,6 +10,7 @@ usr/lib/mysql-router/libmysqlharness_stdx.so.1
 usr/lib/mysql-router/libmysqlharness_tls.so.1
 usr/lib/mysql-router/libmysqlrouter.so.1
 usr/lib/mysql-router/libmysqlrouter_connection_pool.so.1
+usr/lib/mysql-router/libmysqlrouter_destination_status.so.1
 usr/lib/mysql-router/libmysqlrouter_http.so.1
 usr/lib/mysql-router/libmysqlrouter_http_auth_backend.so.1
 usr/lib/mysql-router/libmysqlrouter_http_auth_realm.so.1
@@ -18,6 +19,7 @@ usr/lib/mysql-router/libmysqlrouter_metadata_cache.so.1
 usr/lib/mysql-router/libmysqlrouter_mysqlxmessages.so.1
 usr/lib/mysql-router/libmysqlrouter_routing.so.1
 usr/lib/mysqlrouter/plugin/connection_pool.so
+usr/lib/mysqlrouter/plugin/destination_status.so
 usr/lib/mysqlrouter/plugin/http_auth_backend.so
 usr/lib/mysqlrouter/plugin/http_auth_realm.so
 usr/lib/mysqlrouter/plugin/http_server.so
