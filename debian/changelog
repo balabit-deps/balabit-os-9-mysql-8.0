@@ -1,3 +1,12 @@
+mysql-8.0 (8.0.33-0ubuntu0.22.04.2) jammy-security; urgency=medium
+
+  * Fix crash on startup on armhf (LP: #2019203)
+    - debian/patches/revert-be8348a7.patch: revert upstream commit.
+  * Fix expired date in main.derived_condition_pushdown test
+    - debian/patches/fix_expired_date_in_test.patch: update expired date.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Thu, 11 May 2023 19:15:00 -0400
+
 mysql-8.0 (8.0.33-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.33 to fix security issues

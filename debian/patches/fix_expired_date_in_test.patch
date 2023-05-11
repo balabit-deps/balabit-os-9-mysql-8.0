@@ -1,0 +1,25 @@
+Description: fix hardcoded date in derived_condition_pushdown test
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+
+--- a/mysql-test/r/derived_condition_pushdown.result
++++ b/mysql-test/r/derived_condition_pushdown.result
+@@ -2111,7 +2111,7 @@ EXPLAIN
+ -> Zero rows (no matching row in const table)  (rows=0)
+ 
+ SET @a = 2;
+-SET @b = '2023-05-06 16:49:45';
++SET @b = '2025-05-06 16:49:45';
+ EXECUTE stmt USING @a, @b;
+ EXPLAIN
+ -> Table scan on dt  (rows=2)
+--- a/mysql-test/t/derived_condition_pushdown.test
++++ b/mysql-test/t/derived_condition_pushdown.test
+@@ -1312,7 +1312,7 @@ eval PREPARE stmt FROM "EXPLAIN FORMAT=t
+ --skip_if_hypergraph  # Depends on the query plan.
+ eval EXECUTE stmt USING @a, @b;
+ SET @a = 2;
+-SET @b = '2023-05-06 16:49:45';
++SET @b = '2025-05-06 16:49:45';
+ --replace_regex $elide_costs
+ --skip_if_hypergraph  # Depends on the query plan.
+ eval EXECUTE stmt USING @a, @b;
