@@ -38,6 +38,8 @@ main.slow_log                      : BUG#00000 -  broken
 main.index_merge_myisam            : BUG#00000 -  broken on i386
 main.mem_cnt_common                : BUG#00000 -  fails
 main.derived_limit                 : BUG#00000 -  fails on s390x since 8.0.31
+main.subquery_sj_all_bka_nobnl     : BUG#111156 - fails on s390x since 8.0.33
+main.subquery_sj_mat_bka_nobnl     : BUG#111156 - fails on s390x since 8.0.33
 EOF
 
 cd /usr/lib/mysql-test

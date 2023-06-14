@@ -1,3 +1,20 @@
+mysql-8.0 (8.0.33-0ubuntu0.22.04.4) jammy; urgency=medium
+
+  * d/t/upstream: Ignore upstream tests due to s390x failure (LP: #2020910)
+    Due to slight variation in the optimization of join statements on s390x, a
+    few upstream tests fail as they show a cost slightly higher than expected.
+    The tests include main.subquery_sj_all_bka_nobnl and
+    main.subquery_sj_mat_bka_nobnl
+
+ -- Lena Voytek <lena.voytek@canonical.com>  Wed, 14 Jun 2023 12:43:34 -0700
+
+mysql-8.0 (8.0.33-0ubuntu0.22.04.3) jammy; urgency=medium
+
+  * d/p/mysql_secure_installation-remove-root-pw-creation.patch: Fix
+    mysql_secure_installation by removing root password creation (LP: #1980466)
+
+ -- Lena Voytek <lena.voytek@canonical.com>  Thu, 08 Jun 2023 07:44:30 -0700
+
 mysql-8.0 (8.0.33-0ubuntu0.22.04.2) jammy-security; urgency=medium
 
   * Fix crash on startup on armhf (LP: #2019203)
