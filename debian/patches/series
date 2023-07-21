@@ -7,5 +7,4 @@ revert_faster_tls_model.patch
 disable_root_files.patch
 disable_timestamping_test.patch
 revert-be8348a7.patch
-fix_expired_date_in_test.patch
 mysql_secure_installation-remove-root-pw-creation.patch

@@ -1,3 +1,14 @@
+mysql-8.0 (8.0.34-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.34 to fix security issues
+    - CVE-2023-22005, CVE-2023-22008, CVE-2023-22033, CVE-2023-22038,
+      CVE-2023-22046, CVE-2023-22048, CVE-2023-22053, CVE-2023-22054,
+      CVE-2023-22056, CVE-2023-22057, CVE-2023-22058
+    - d/p/fix_expired_date_in_test.patch: removed, no longer needed with
+      new version.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Fri, 21 Jul 2023 09:03:20 -0400
+
 mysql-8.0 (8.0.33-0ubuntu0.22.04.4) jammy; urgency=medium
 
   * d/t/upstream: Ignore upstream tests due to s390x failure (LP: #2020910)
