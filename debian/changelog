@@ -1,3 +1,13 @@
+mysql-8.0 (8.0.35-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.35 to fix security issues
+    - CVE-2023-22032, CVE-2023-22059, CVE-2023-22064, CVE-2023-22066,
+      CVE-2023-22068, CVE-2023-22070, CVE-2023-22078, CVE-2023-22079,
+      CVE-2023-22084, CVE-2023-22092, CVE-2023-22097, CVE-2023-22103,
+      CVE-2023-22112, CVE-2023-22114
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Wed, 25 Oct 2023 13:34:23 -0400
+
 mysql-8.0 (8.0.34-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.34 to fix security issues
