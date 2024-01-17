@@ -1,0 +1,13 @@
+Description: specify armhf doesn't have a 64bit timer
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+
+--- a/mysql-test/include/have_64bits_time.inc
++++ b/mysql-test/include/have_64bits_time.inc
+@@ -1,6 +1,6 @@
+ # see also have_32bits_time.inc
+ 
+-let $have_32bit = `SELECT @@version_compile_machine = 'i686'`;
++let $have_32bit = `SELECT @@version_compile_machine = 'i686' OR @@version_compile_machine = 'armv7l'`;
+ 
+ if ($have_32bit) {
+   --skip Doesn't support 64 bits UNIX time

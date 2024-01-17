@@ -28,7 +28,7 @@ TMP := $(CURDIR)/debian/tmp/
 NUMJOBS=$(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 TESTJOBS=$(NUMJOBS)
 # Some tests will fail on platforms that are not tested by upstream
-ifneq (,$(filter $(ARCH), amd64 i386))
+ifneq (,$(filter $(ARCH), amd64 i386 armhf))
     TESTSUITE_FAIL_CMD:=exit 1
 else
     TESTSUITE_FAIL_CMD:=true

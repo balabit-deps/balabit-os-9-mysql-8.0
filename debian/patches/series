@@ -6,5 +6,6 @@ use-largest-lock-free-type-selector-on-riscv.patch
 revert_faster_tls_model.patch
 disable_root_files.patch
 disable_timestamping_test.patch
-revert-be8348a7.patch
 mysql_secure_installation-remove-root-pw-creation.patch
+suppress_armhf_test_warning.patch
+disable_64bits_time_armhf.patch

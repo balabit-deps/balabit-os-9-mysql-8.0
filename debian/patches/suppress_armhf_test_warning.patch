@@ -1,0 +1,18 @@
+Description: suppress warning about the CYCLE timer not being available on armhf
+Author: Marc Deslauriers <marc.deslauriers@canonical.com>
+Ubuntu-Bug: https://bugs.launchpad.net/ubuntu/+source/mysql-8.0/+bug/1999075
+
+--- a/mysql-test/include/mtr_warnings.sql
++++ b/mysql-test/include/mtr_warnings.sql
+@@ -377,6 +377,11 @@ INSERT INTO global_suppressions VALUES
+ 
+  ("'mysql_native_password' is deprecated and will be removed in a future release."),
+ 
++ /*
++   the CYCLE timer is not available on armhf
++ */
++ ("The CYCLE timer is not available. WAIT events in the performance_schema will not be timed."),
++
+  ("THE_LAST_SUPPRESSION");
+ 
+ 

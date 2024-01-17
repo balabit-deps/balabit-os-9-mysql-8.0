@@ -1,3 +1,25 @@
+mysql-8.0 (8.0.36-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.36 to fix security issues
+    - CVE-2024-20960, CVE-2024-20961, CVE-2024-20962, CVE-2024-20963,
+      CVE-2024-20964, CVE-2024-20965, CVE-2024-20966, CVE-2024-20967,
+      CVE-2024-20969, CVE-2024-20970, CVE-2024-20971, CVE-2024-20972,
+      CVE-2024-20973, CVE-2024-20974, CVE-2024-20976, CVE-2024-20977,
+      CVE-2024-20978, CVE-2024-20981, CVE-2024-20982, CVE-2024-20983,
+      CVE-2024-20984, CVE-2024-20985
+    - debian/patches/revert_faster_tls_model.patch: updated for new
+      version.
+  * Removed patch no longer needed with 8.0.35+
+    - debian/patches/revert-be8348a7.patch: fix crash on startup on armhf
+  * Enable test suite on armhf (LP: #2024276)
+    - debian/rules: check for failures in armhf tests
+    - debian/patches/suppress_armhf_test_warning.patch: suppress warning
+      about the CYCLE timer not being available on armhf. (LP: #1999075)
+    - debian/patches/disable_64bits_time_armhf.patch: specify armhf doesn't
+      have a 64bit timer in mysql-test/include/have_64bits_time.inc.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Wed, 17 Jan 2024 15:13:42 -0500
+
 mysql-8.0 (8.0.35-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.35 to fix security issues
