@@ -1,3 +1,15 @@
+mysql-8.0 (8.0.37-0ubuntu0.22.04.3) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.37 to fix security issues
+    - CVE-2024-20994, CVE-2024-20998, CVE-2024-21000, CVE-2024-21008,
+      CVE-2024-21009, CVE-2024-21013, CVE-2024-21047, CVE-2024-21054,
+      CVE-2024-21060, CVE-2024-21062, CVE-2024-21069, CVE-2024-21087,
+      CVE-2024-21096, CVE-2024-21102
+    - debian/patches/revert_faster_tls_model.patch: updated for new
+      version.
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Tue, 30 Apr 2024 09:06:50 -0400
+
 mysql-8.0 (8.0.36-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.36 to fix security issues
