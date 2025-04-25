@@ -1,3 +1,16 @@
+mysql-8.0 (8.0.42-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.42 to fix security issues
+    - CVE-2025-21574, CVE-2025-21575, CVE-2025-21577, CVE-2025-21579,
+      CVE-2025-21580, CVE-2025-21581, CVE-2025-21584, CVE-2025-21585,
+      CVE-2025-30681, CVE-2025-30682, CVE-2025-30683, CVE-2025-30684,
+      CVE-2025-30685, CVE-2025-30687, CVE-2025-30688, CVE-2025-30689,
+      CVE-2025-30693, CVE-2025-30695, CVE-2025-30696, CVE-2025-30699,
+      CVE-2025-30703, CVE-2025-30704, CVE-2025-30705, CVE-2025-30715,
+      CVE-2025-30721, CVE-2025-30722
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Fri, 25 Apr 2025 13:19:53 -0400
+
 mysql-8.0 (8.0.41-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.41 to fix security issues
