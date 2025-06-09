@@ -1,3 +1,13 @@
+mysql-8.0 (8.0.42-0ubuntu0.22.04.2) jammy; urgency=medium
+
+  * Update mysql-server-8.0 logrotate config to fix issues
+    - Add su directive to logrotate config to run as mysql user and adm group
+      (LP: #2112151).
+    - Update logrotate script to test if mysql-server is online before flushing
+      logs (LP: #1850980).   
+
+ -- Lena Voytek <lena.voytek@canonical.com>  Mon, 09 Jun 2025 14:18:01 -0400
+
 mysql-8.0 (8.0.42-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.42 to fix security issues

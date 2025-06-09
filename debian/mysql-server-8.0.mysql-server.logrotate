@@ -1,27 +1,32 @@
-# - I put everything in one block and added sharedscripts, so that mysql gets 
-#   flush-logs'd only once.
-#   Else the binary logs would automatically increase by n times every day.
-# - The error log is obsolete, messages go to syslog now.
+# Flush all mysql server logs together using mysqladmin flush-logs.
+# mysqld must be active for the script to run successfully.
 /var/log/mysql.log /var/log/mysql/*log {
 	daily
 	rotate 7
 	missingok
 	create 640 mysql adm
+	su mysql adm
 	compress
 	sharedscripts
 	postrotate
+		# Confirm mysqladmin exists as it is needed for flushing logs.
+		# If not, ignore this rotation as mysql-server has likely been removed.
 		test -x /usr/bin/mysqladmin || exit 0
-		# If this fails, check debian.conf! 
+
+		# Run mysqladmin using the debian.cnf configuration to rotate logs.
 		MYADMIN="/usr/bin/mysqladmin --defaults-file=/etc/mysql/debian.cnf"
-		if [ -z "`$MYADMIN ping 2>/dev/null`" ]; then
-		  # Really no mysqld or rather a missing debian-sys-maint user?
-		  # If this occurs and is not a error please report a bug.
-		  #if ps cax | grep -q mysqld; then
-		  if killall -q -s0 -umysql mysqld; then
- 		    exit 1
-		  fi 
+
+		# Ping mysqld to confirm it is responsive, which is required for flushing.
+		$MYADMIN ping >/dev/null 2>&1
+		PING_STATUS_CODE=$?
+
+		if [ "${PING_STATUS_CODE}" -eq "0" ]; then
+			# Flush all server logs.
+			$MYADMIN flush-logs
 		else
-		  $MYADMIN flush-logs
+			# The server is down, or debian.cnf is bad. Return error to show
+			# that the logs could not be flushed.
+			exit 1
 		fi
 	endscript
 }
