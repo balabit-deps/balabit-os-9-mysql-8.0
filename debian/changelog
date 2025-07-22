@@ -1,3 +1,15 @@
+mysql-8.0 (8.0.43-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.43 to fix security issues
+    - CVE-2025-50077, CVE-2025-50078, CVE-2025-50079, CVE-2025-50080,
+      CVE-2025-50081, CVE-2025-50082, CVE-2025-50083, CVE-2025-50084,
+      CVE-2025-50085, CVE-2025-50086, CVE-2025-50087, CVE-2025-50091,
+      CVE-2025-50092, CVE-2025-50093, CVE-2025-50094, CVE-2025-50096,
+      CVE-2025-50097, CVE-2025-50098, CVE-2025-50099, CVE-2025-50100,
+      CVE-2025-50101, CVE-2025-50102, CVE-2025-50104, CVE-2025-53023
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Tue, 22 Jul 2025 12:44:36 -0400
+
 mysql-8.0 (8.0.42-0ubuntu0.22.04.2) jammy; urgency=medium
 
   * Update mysql-server-8.0 logrotate config to fix issues
