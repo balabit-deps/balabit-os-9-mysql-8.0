@@ -1,3 +1,10 @@
+mysql-8.0 (8.0.43-0ubuntu0.22.04.2) jammy; urgency=medium
+
+  * Modify logrotate script to silently exit if mysql service is not active
+    (LP: #2120936).
+
+ -- Ghadi Elie Rahme <ghadi.rahme@canonical.com>  Tue, 19 Aug 2025 15:25:22 +0000
+
 mysql-8.0 (8.0.43-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.43 to fix security issues

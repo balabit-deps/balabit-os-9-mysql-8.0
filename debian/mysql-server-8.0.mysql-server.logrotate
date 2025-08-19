@@ -9,8 +9,10 @@
 	compress
 	sharedscripts
 	postrotate
-		# Confirm mysqladmin exists as it is needed for flushing logs.
-		# If not, ignore this rotation as mysql-server has likely been removed.
+		# Confirm that the mysql service is running and that mysqladmin
+		# exists as it is needed for flushing logs. If not, ignore this
+		# rotation as mysql-server has likely been removed or is inactive.
+		systemctl is-active --quiet mysql || exit 0
 		test -x /usr/bin/mysqladmin || exit 0
 
 		# Run mysqladmin using the debian.cnf configuration to rotate logs.
