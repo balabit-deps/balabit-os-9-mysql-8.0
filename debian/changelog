@@ -1,3 +1,9 @@
+mysql-8.0 (8.0.44-0ubuntu0.22.04.2) jammy; urgency=medium
+
+  * Update postinst to ignore lost+found directory (LP: #2129196)
+
+ -- Zachary Raines <zachary.raines@canonical.com>  Wed, 19 Nov 2025 09:55:36 -0600
+
 mysql-8.0 (8.0.44-0ubuntu0.22.04.1) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Update to 8.0.44 to fix security issues

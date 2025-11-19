@@ -273,7 +273,7 @@ case "$1" in
 
     # Initiate database. Output is not allowed by debconf :-(
     # If database doesn't exist we create it.
-    if [ ! "$(ls -A "${mysql_statedir}")" ] && [ -d "${mysql_filesdir}" ]; then
+    if [ ! "$(ls -A "${mysql_statedir}" -I "lost+found")" ] && [ -d "${mysql_filesdir}" ]; then
       existingdatabase=0
       initfile=`mktemp --tmpdir=/var/lib/mysql-files/`
       touch "$initfile"
