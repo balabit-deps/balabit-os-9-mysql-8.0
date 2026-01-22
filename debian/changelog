@@ -1,3 +1,11 @@
+mysql-8.0 (8.0.45-0ubuntu0.22.04.1) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Update to 8.0.45 to fix security issues
+    - CVE-2026-21936, CVE-2026-21937, CVE-2026-21941, CVE-2026-21948,
+      CVE-2026-21964, CVE-2026-21968
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Thu, 22 Jan 2026 07:44:49 -0500
+
 mysql-8.0 (8.0.44-0ubuntu0.22.04.2) jammy; urgency=medium
 
   * Update postinst to ignore lost+found directory (LP: #2129196)
